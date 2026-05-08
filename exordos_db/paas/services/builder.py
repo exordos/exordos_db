@@ -15,14 +15,14 @@
 #    under the License.
 
 import logging
-import uuid as sys_uuid
 import typing as tp
 import uuid
+import uuid as sys_uuid
 
 from gcl_looper.services.oslo import base as oslo_base
-from gcl_sdk.paas.services import builder
-from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.agents.universal.dm import models as ua_models
+from gcl_sdk.infra.dm import models as sdk_models
+from gcl_sdk.paas.services import builder
 
 from exordos_db.paas.dm import models
 

@@ -18,8 +18,8 @@ import logging
 
 from oslo_config import cfg
 
-from exordos_db.common import constants
 from exordos_db import version
+from exordos_db.common import constants
 
 GLOBAL_SERVICE_NAME = constants.GLOBAL_SERVICE_NAME
 
