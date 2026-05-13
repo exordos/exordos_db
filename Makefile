@@ -11,7 +11,7 @@ help:
 	@echo "install          - install element"
 
 build:
-	genesis build -i $(SSH_KEY) -f . --inventory --manifest-var repository=$(REPOSITORY)
+	genesis build -i $(SSH_KEY) -f --manifest-var repository=$(REPOSITORY)
 
 install:
 	genesis elements install output/manifests/dbaas.yaml
