@@ -25,13 +25,14 @@ jobs:
           mkdir -p ${ARTIFACTS_PATH}
 
           source ~/.profile
-          VERSION="$(genesis get-version .)"
+          VERSION="$(exordos get-version .)"
 
-          genesis build $(pwd) --inventory
+          exordos build $(pwd)
 
           # Decode and write the push configuration
-          echo "$PUSH_CFG" | base64 -d > genesis/genesis.push.yaml
-          genesis push -c genesis/genesis.push.yaml -t local -f --latest
+          mkdir -p exordos
+          echo "$PUSH_CFG" | base64 -d > exordos/exordos.push.yaml
+          exordos push -c exordos/exordos.push.yaml -t local -f --latest
 
           # Temporary upload step is done in the build script
           echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
