@@ -41,7 +41,7 @@ build:
       images:
       - name: exordos-db
         format: gz
-        profile: genesis_base
+        profile: exordos_base
         script: images/cp_install.sh
 
         # Override image build parameters, for instance disk size
@@ -51,7 +51,7 @@ build:
           - LAB_MODE
       - name: exordos-db-pg
         format: gz
-        profile: genesis_base
+        profile: exordos_base
         script: images/pg_install.sh
 
         # Override image build parameters, for instance disk size
@@ -62,7 +62,7 @@ build:
           - LAB_MODE
       # - name: exordos-db-pg-lab
       #   format: gz
-      #   profile: genesis_base
+      #   profile: exordos_base
       #   script: images/pg_install.sh
 
       #   # Override image build parameters, for instance disk size
