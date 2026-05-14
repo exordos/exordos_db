@@ -24,7 +24,6 @@ jobs:
 
           mkdir -p ${ARTIFACTS_PATH}
 
-          source ~/.profile
           VERSION="$(exordos get-version .)"
 
           exordos build $(pwd)
