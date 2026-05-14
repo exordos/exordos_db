@@ -20,11 +20,12 @@ set -eu
 set -x
 set -o pipefail
 
-source /usr/local/lib/genesis/lib_bootstrap.sh
+source /usr/local/lib/exordos/lib_bootstrap.sh
 
 GC_PATH="/opt/exordos_db"
 SERVICE_CONFIG="/etc/exordos_db/exordos_db.conf"
 CORE_AGENT_CONFIG="/etc/exordos_db/core_agent.conf"
+PG_VERSION="18"
 
 while [ ! -f /etc/exordos_init.txt ]; do sleep 1; done
 source /etc/exordos_init.txt
@@ -40,24 +41,24 @@ export GC_PG_DB="${GC_PG_DB:-exordos_db}"
 
 # persistent data routines
 PERSISTENT_DISK=$(find_persistent_disk)
-prepare_persistent_disk "$(find_persistent_disk)" "$PERSISTENT_MOUNT"
+prepare_persistent_disk "$PERSISTENT_DISK" "$PERSISTENT_MOUNT"
 
 if [[ -n "$PERSISTENT_DISK" ]]; then
     # Migrate logs first, some processes may be left writing to root disk until next reboot
     migrate_to_persistent_restart "/var/log" "${PERSISTENT_MOUNT}/var/log" "systemd-journald rsyslog"
-    migrate_to_persistent_stop_start "/var/lib/postgresql" "${PERSISTENT_MOUNT}/var/lib/postgresql" "postgresql"
+    migrate_to_persistent_stop_start "/var/lib/postgresql" "${PERSISTENT_MOUNT}/var/lib/postgresql" "postgresql@${PG_VERSION}-main"
     # private_key will be updated in seed_os, use it
     cp /var/lib/genesis/universal_agent/private_key /root/private_key
-    migrate_to_persistent_stop_start "/var/lib/genesis" "${PERSISTENT_MOUNT}/var/lib/genesis" "genesis-universal-agent"
+    migrate_to_persistent_stop_start "/var/lib/genesis" "${PERSISTENT_MOUNT}/var/lib/genesis" "exordos-universal-agent"
     mv -f /root/private_key /var/lib/genesis/universal_agent/private_key
-    migrate_to_persistent "/var/lib/exordos" "${PERSISTENT_MOUNT}/var/lib/exordos"
+    mkdir -p /var/lib/exordos/exordos_db
+    migrate_to_persistent "/var/lib/exordos/exordos_db" "${PERSISTENT_MOUNT}/var/lib/exordos/exordos_db"
     migrate_to_persistent "/etc/exordos_db" "${PERSISTENT_MOUNT}/etc/exordos_db"
 
     persist_migrate_complete
 fi
 
 if [[ ! -f $SERVICE_CONFIG ]]; then
-    systemctl enable --now "postgresql"
     setup_postgresql_user_and_db "$GC_PG_USER" "$GC_PG_PASS" "$GC_PG_DB"
     try_generate_config $SERVICE_CONFIG
     try_generate_config $CORE_AGENT_CONFIG
@@ -68,7 +69,7 @@ ra-apply-migration --config-dir "/etc/exordos_db/" --path ""$GC_PATH"/.venv/lib/
 ra-apply-migration --config-dir "/etc/exordos_db/" --path "$GC_PATH/migrations"
 deactivate
 
-# Enable genesis db services
+# Enable exordos db services
 sudo systemctl enable --now \
     exordos-db-gservice \
     exordos-db-user-api \

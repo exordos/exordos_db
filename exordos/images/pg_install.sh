@@ -25,7 +25,7 @@ GC_PATH="/opt/exordos_db"
 GC_CFG_DIR=/etc/exordos_db
 WORK_DIR="/var/lib/exordos/exordos_db"
 VENV_PATH="$GC_PATH/.venv"
-BOOTSTRAP_PATH="/var/lib/genesis/bootstrap/scripts"
+BOOTSTRAP_PATH="/var/lib/exordos/bootstrap/scripts"
 
 SYSTEMD_SERVICE_DIR=/etc/systemd/system/
 
@@ -40,12 +40,12 @@ sudo apt dist-upgrade -y
 sudo apt install -y \
     libev-dev yq watchdog
 
-# Install genesis core
+# Install exordos db
 sudo mkdir -p $GC_CFG_DIR
 sudo mkdir -p $WORK_DIR
 sudo cp "$GC_PATH/etc/exordos_db/exordos_pg_agent.conf" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/logging.yaml" $GC_CFG_DIR/
-sudo cp "$GC_PATH/genesis/images/pg_bootstrap.sh" $BOOTSTRAP_PATH/0100-ec-bootstrap.sh
+sudo cp "$GC_PATH/exordos/images/pg_bootstrap.sh" $BOOTSTRAP_PATH/0100-ec-bootstrap.sh
 
 cd "$GC_PATH"
 uv sync
@@ -65,7 +65,7 @@ deactivate
 # Install Systemd service files
 sudo cp "$GC_PATH/etc/systemd/exordos-db-pg-agent.service" $SYSTEMD_SERVICE_DIR
 
-# Enable genesis db services
+# Enable exordos db services
 sudo systemctl enable exordos-db-pg-agent
 
 
@@ -128,7 +128,7 @@ if [ -n "$LAB_MODE" ]; then
     # copy lab materials into home dir
     rsync -a "$GC_PATH/lab/" /home/ubuntu/
 
-    # NOTE: don't use genesis build -i, it'll override these keys!
+    # NOTE: don't use exordos build -i, it'll override these keys!
     # Add speakers' keys
     sudo -u ubuntu touch /home/ubuntu/.ssh/authorized_keys
     for user in gmelikov akremenetsky phantomii slashburygin; do

@@ -24,7 +24,7 @@ set -o pipefail
 GC_PATH="/opt/exordos_db"
 GC_CFG_DIR=/etc/exordos_db
 VENV_PATH="$GC_PATH/.venv"
-BOOTSTRAP_PATH="/var/lib/genesis/bootstrap/scripts"
+BOOTSTRAP_PATH="/var/lib/exordos/bootstrap/scripts"
 
 PG_VERSION="18"
 
@@ -49,12 +49,12 @@ sudo systemctl disable --now "postgresql"
 # Note: PostgreSQL database and user creation is done in bootstrap.sh
 # on the persistent disk to ensure data survives OS image updates
 
-# Install genesis core
+# Install exordos db
 sudo mkdir -p $GC_CFG_DIR
 sudo cp "$GC_PATH/etc/exordos_db/exordos_db.conf.j2" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/core_agent.conf.j2" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/logging.yaml" $GC_CFG_DIR/
-sudo cp "$GC_PATH/genesis/images/cp_bootstrap.sh" $BOOTSTRAP_PATH/0100-gc-bootstrap.sh
+sudo cp "$GC_PATH/exordos/images/cp_bootstrap.sh" $BOOTSTRAP_PATH/0100-gc-bootstrap.sh
 
 cd "$GC_PATH"
 uv sync
@@ -72,7 +72,7 @@ sudo ln -sf "$VENV_PATH/bin/exordos-db-gservice" "/usr/bin/exordos-db-gservice"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-user-api" "/usr/bin/exordos-db-user-api"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-status-api" "/usr/bin/exordos-db-status-api"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-orch-api" "/usr/bin/exordos-db-orch-api"
-sudo ln -sf "$VENV_PATH/bin/genesis-universal-agent-db-back" "/usr/bin/genesis-universal-agent-db-back"
+sudo ln -sf "$VENV_PATH/bin/genesis-universal-agent-db-back" "/usr/bin/exordos-universal-agent-db-back"
 
 # Install Systemd service files
 sudo cp "$GC_PATH/etc/systemd/exordos-db-gservice.service" $SYSTEMD_SERVICE_DIR

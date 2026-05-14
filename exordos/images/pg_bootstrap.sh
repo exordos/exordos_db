@@ -20,7 +20,7 @@ set -eu
 set -x
 set -o pipefail
 
-source /usr/local/lib/genesis/lib_bootstrap.sh
+source /usr/local/lib/exordos/lib_bootstrap.sh
 
 # persistent data routines
 PERSISTENT_DISK=$(find_persistent_disk)
@@ -37,7 +37,7 @@ if [[ -n "$PERSISTENT_DISK" ]]; then
     persist_migrate_complete
 fi
 
-# Enable genesis db services
+# Enable exordos db services
 sudo systemctl enable --now \
     exordos-patroni
 
