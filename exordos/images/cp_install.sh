@@ -54,7 +54,7 @@ sudo mkdir -p $GC_CFG_DIR
 sudo cp "$GC_PATH/etc/exordos_db/exordos_db.conf.j2" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/core_agent.conf.j2" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/logging.yaml" $GC_CFG_DIR/
-sudo cp "$GC_PATH/exordos/images/cp_bootstrap.sh" $BOOTSTRAP_PATH/0100-gc-bootstrap.sh
+sudo cp "$GC_PATH/exordos/images/cp_bootstrap.sh" $BOOTSTRAP_PATH/0100-ec-bootstrap.sh
 
 cd "$GC_PATH"
 uv sync
