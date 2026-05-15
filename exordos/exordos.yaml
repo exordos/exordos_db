@@ -40,7 +40,7 @@ build:
       - path: ../docs/openapi/openapi_user.yaml
       images:
       - name: exordos-db
-        format: gz
+        format: zst
         profile: exordos_base
         script: images/cp_install.sh
 
@@ -50,7 +50,7 @@ build:
         envs:
           - LAB_MODE
       - name: exordos-db-pg
-        format: gz
+        format: zst
         profile: exordos_base
         script: images/pg_install.sh
 
@@ -61,7 +61,7 @@ build:
         envs:
           - LAB_MODE
       # - name: exordos-db-pg-lab
-      #   format: gz
+      #   format: zst
       #   profile: exordos_base
       #   script: images/pg_install.sh
 

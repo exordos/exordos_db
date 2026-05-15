@@ -1,7 +1,8 @@
 name: build
 
-on:
-  push:
+on: workflow_dispatch
+#on:
+#  push:
 
 env:
   ARTIFACTS_PATH: artifacts
@@ -79,7 +80,8 @@ jobs:
           exit 1
       - name: Set hypervisor with overbooking
         run: |
-          exordos compute hypervisors add -u 63d6caf1-c452-4697-9d03-b4579612c1f5 -m VM --cores_ratio 10.0 --ram_ratio 10.0 -d driver=libvirt -d iface_mtu=1500 -d network_type=network -d network=exordos-core-net -d storage_pool=default -d connection_uri=qemu+tcp://10.20.0.1/system -d machine_prefix=dev-
+          HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."UUID")"
+          exordos compute hypervisors update $HYPER_UUID --cores_ratio 10.0 --ram_ratio 10.0
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:

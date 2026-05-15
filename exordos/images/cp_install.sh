@@ -35,7 +35,6 @@ SDK_DEV_MODE=$([ -d "$DEV_SDK_PATH" ] && echo "true" || echo "false")
 
 # Install packages
 sudo apt update
-sudo apt dist-upgrade -y
 sudo apt install -y \
     postgresql-common \
     libev-dev \

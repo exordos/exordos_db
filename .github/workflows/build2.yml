@@ -1,0 +1,76 @@
+name: build2
+
+on:
+  push:
+
+env:
+  ARTIFACTS_PATH: artifacts
+  CORE_BRANCH: "master"
+  PACKER_VERSION: "1.9.2"
+  CORE_ENDPOINT_URL: http://10.20.0.2:11010
+  CORE_USERNAME: "admin"
+  CORE_PASSWORD: "admin"
+#  PACKER_LOG: 1
+  ELEMENT_NAME: dbaas
+
+jobs:
+  BuildTestPush:
+    runs-on: ubuntu-24.04
+    if : ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - name: Setup `packer`
+        uses: hashicorp/setup-packer@main
+        with:
+          version: ${{ env.PACKER_VERSION }}
+      - name: Install exordos
+        run: curl -fsSL https://repository.genesis-core.tech/install.sh | sudo sh
+      - name: Install hypervisor
+        run: |
+          sudo exordos compute hypervisors init
+          sudo chmod +666 /dev/kvm
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Build Exordos DB
+        env:
+          PUSH_EXORDOS_CFG: ${{ secrets.PUSH_EXORDOS_CFG }}
+        run: |
+          set -eux
+          
+          mkdir -p ${ARTIFACTS_PATH}
+
+          VERSION="$(exordos get-version .)"
+          
+          exordos build $(pwd)
+          
+          echo "$PUSH_EXORDOS_CFG" | base64 -d > exordos/exordos.push.yaml
+          exordos push -c exordos/exordos.push.yaml -t exordos_repo -f --latest
+          
+          exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
+          exordos settings set-context default --name default --user $CORE_USERNAME --password $CORE_PASSWORD
+          
+          exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
+          
+          for i in {1..60}; do
+            if exordos ready_api; then
+              echo "Exordos Core API is ready"
+              break
+            fi
+            echo "Waiting for Exordos Core API... ($i/60)"
+            sleep 5
+          done
+          # echo "Exordos Core API did not become ready"
+          # exit 1
+          
+          HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."UUID")"
+          exordos compute hypervisors update $HYPER_UUID --cores_ratio 10.0 --ram_ratio 10.0
+          
+          exordos e e install $ELEMENT_NAME -v $VERSION
+
+          while [ $(exordos ee l -o json -f name=$ELEMENT_NAME | jq -r .[0]."Status") != "ACTIVE" ]; do
+            exordos e e show $ELEMENT_NAME
+            sleep 5
+          done
+          
+          exordos e e show $ELEMENT_NAME
+          
