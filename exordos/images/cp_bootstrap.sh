@@ -65,7 +65,7 @@ if [[ ! -f $SERVICE_CONFIG ]]; then
 fi
 
 source "$GC_PATH"/.venv/bin/activate
-ra-apply-migration --config-dir "/etc/exordos_db/" --path ""$GC_PATH"/.venv/lib/python3.12/site-packages/gcl_sdk/migrations"
+ra-apply-migration --config-dir "/etc/exordos_db/" --path "$($GC_PATH/.venv/bin/python3 -c 'import gcl_sdk; print(gcl_sdk.__path__[0] + "/migrations")')"
 ra-apply-migration --config-dir "/etc/exordos_db/" --path "$GC_PATH/migrations"
 deactivate
 
