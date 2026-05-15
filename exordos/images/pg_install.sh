@@ -36,7 +36,6 @@ PG_VERSION="18"
 
 # Install packages
 sudo apt update
-sudo apt dist-upgrade -y
 sudo apt install -y \
     libev-dev yq watchdog
 
