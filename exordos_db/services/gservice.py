@@ -15,21 +15,19 @@
 #    under the License.
 from __future__ import annotations
 
+import logging
+import os
 import typing as tp
 
-import os
-import logging
-
 from gcl_looper.services.oslo import base as oslo_base
-from oslo_config import cfg
-
-
+from gcl_sdk.agents.universal import utils as ua_utils
 from gcl_sdk.agents.universal.clients.orch import db as orch_db
+from gcl_sdk.agents.universal.drivers import core as core_drivers
 from gcl_sdk.agents.universal.services import agent as agent_service
 from gcl_sdk.agents.universal.services import scheduler as scheduler_service
-from gcl_sdk.agents.universal import utils as ua_utils
-from gcl_sdk.agents.universal.drivers import core as core_drivers
 from gcl_sdk.common.oslo import types as sdk_cfg_types
+from oslo_config import cfg
+
 from exordos_db.common import constants as cc
 
 LOG = logging.getLogger(__name__)

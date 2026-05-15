@@ -17,8 +17,8 @@
 import logging
 import sys
 
-from oslo_config import cfg
 from gcl_looper.services.oslo import launchpad
+from oslo_config import cfg
 from restalchemy.common import config_opts as ra_config_opts
 from restalchemy.storage.sql import engines
 

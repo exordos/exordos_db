@@ -15,8 +15,8 @@
 #    under the License.
 
 import os
-import requests
 
+import requests
 import ruamel.yaml
 
 from exordos_db.common.utils import PROJECT_PATH

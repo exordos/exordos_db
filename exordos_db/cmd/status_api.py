@@ -23,9 +23,9 @@ from oslo_config import cfg
 from restalchemy.common import config_opts as ra_config_opts
 from restalchemy.storage.sql import engines
 
-from exordos_db.status_api.api import app
 from exordos_db.common import config
 from exordos_db.common import log as infra_log
+from exordos_db.status_api.api import app
 
 api_cli_opts = [
     cfg.StrOpt(

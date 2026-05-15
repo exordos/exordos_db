@@ -28,11 +28,11 @@ dependencies = [
     "PyYAML>=6.0.0,<7.0.0",  # MIT
 ]
 [project.urls]
-homepage = "https://github.com/infraguys/exordos_db/"
+homepage = "https://github.com/exordos/exordos_db/"
 
 [build-system]
 requires = [
-    "setuptools>=82.0.1",  # last version for python3.8
+    "setuptools>=82.0.1",
     "setuptools_scm>=10.0.5"
 ]
 build-backend = "setuptools.build_meta"
@@ -122,6 +122,14 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["exordos_db"]
+combine-as-imports = false
+force-sort-within-sections = true
+order-by-type = true
+split-on-trailing-comma = true
+force-single-line = true
 
 [tool.setuptools.packages.find]
 where = ["."]

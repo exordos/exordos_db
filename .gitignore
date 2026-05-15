@@ -38,6 +38,7 @@ ChangeLog
 cover/
 version.txt
 output
+_tmp_*
 
 #Configs
 etc/*/*local.conf

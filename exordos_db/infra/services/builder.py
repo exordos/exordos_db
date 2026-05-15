@@ -15,18 +15,18 @@
 #    under the License.
 
 import logging
-import uuid as sys_uuid
 import typing as tp
 import uuid
+import uuid as sys_uuid
 
-from oslo_config import cfg
 from gcl_looper.services.oslo import base as oslo_base
-from gcl_sdk.infra.services import builder
-from gcl_sdk.infra import constants as sdk_c
-from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.agents.universal.dm import models as ua_models
 from gcl_sdk.agents.universal.drivers import core as core_drivers
 from gcl_sdk.common.oslo import types as sdk_cfg_types
+from gcl_sdk.infra import constants as sdk_c
+from gcl_sdk.infra.dm import models as sdk_models
+from gcl_sdk.infra.services import builder
+from oslo_config import cfg
 from restalchemy.dm import filters as dm_filters
 
 from exordos_db.infra.dm import models
