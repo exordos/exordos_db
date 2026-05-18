@@ -145,7 +145,7 @@ resources:
         kind: "disks"
         disks:
           - size: 6
-            image: "{{ repository | default('https://repo.exordos.com/exordos-elements') }}/dbaas/{{ version }}/images/exordos-db.raw.gz"
+            image: "{{ repository | default('https://repo.exordos.com/exordos-elements') }}/dbaas/{{ version }}/images/exordos-db.raw.zst"
             label: root
           - size: 10
             label: data
@@ -172,7 +172,7 @@ resources:
   $dbaas.types.postgres.versions:
     pg18:
       name: "pg18"
-      image: "{{ repository | default('https://repo.exordos.com/exordos-elements') }}/dbaas/{{ version }}/images/exordos-db-pg.raw.gz"
+      image: "{{ repository | default('https://repo.exordos.com/exordos-elements') }}/dbaas/{{ version }}/images/exordos-db-pg.raw.zst"
 
   $dbaas.imports.$core_local_domain.records:
     dbaas_cp:
