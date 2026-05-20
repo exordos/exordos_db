@@ -56,7 +56,7 @@ jobs:
         with:
           version: ${{ env.PACKER_VERSION }}
       - name: Install exordos
-        run: curl -fsSL https://repository.genesis-core.tech/install.sh | sudo sh
+        run: curl -fsSL https://repo.exordos.com/install.sh | sudo sh
       - name: set exordos config
         run: |
           exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
@@ -93,7 +93,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set -eux
-          
+
           while [ $(exordos ee l -o json -f name=dbaas | jq -r .[0]."Status") != "ACTIVE" ]; do
             sleep 5
           done

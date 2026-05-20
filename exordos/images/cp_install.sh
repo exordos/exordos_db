@@ -72,7 +72,7 @@ sudo ln -sf "$VENV_PATH/bin/exordos-db-gservice" "/usr/bin/exordos-db-gservice"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-user-api" "/usr/bin/exordos-db-user-api"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-status-api" "/usr/bin/exordos-db-status-api"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-orch-api" "/usr/bin/exordos-db-orch-api"
-sudo ln -sf "$VENV_PATH/bin/genesis-universal-agent-db-back" "/usr/bin/exordos-universal-agent-db-back"
+sudo ln -sf "$VENV_PATH/bin/exordos-universal-agent-db-back" "/usr/bin/exordos-universal-agent-db-back"
 
 # Install Systemd service files
 sudo cp "$GC_PATH/etc/systemd/exordos-db-gservice.service" $SYSTEMD_SERVICE_DIR
