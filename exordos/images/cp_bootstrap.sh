@@ -47,10 +47,6 @@ if [[ -n "$PERSISTENT_DISK" ]]; then
     # Migrate logs first, some processes may be left writing to root disk until next reboot
     migrate_to_persistent_restart "/var/log" "${PERSISTENT_MOUNT}/var/log" "systemd-journald rsyslog"
     migrate_to_persistent_stop_start "/var/lib/postgresql" "${PERSISTENT_MOUNT}/var/lib/postgresql" "postgresql@${PG_VERSION}-main"
-    # private_key will be updated in seed_os, use it
-    cp /var/lib/genesis/universal_agent/private_key /root/private_key
-    migrate_to_persistent_stop_start "/var/lib/genesis" "${PERSISTENT_MOUNT}/var/lib/genesis" "exordos-universal-agent"
-    mv -f /root/private_key /var/lib/genesis/universal_agent/private_key
     mkdir -p /var/lib/exordos/exordos_db
     migrate_to_persistent "/var/lib/exordos/exordos_db" "${PERSISTENT_MOUNT}/var/lib/exordos/exordos_db"
     migrate_to_persistent "/etc/exordos_db" "${PERSISTENT_MOUNT}/etc/exordos_db"
