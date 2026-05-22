@@ -6,80 +6,73 @@ on:
 env:
   ARTIFACTS_PATH: artifacts
   CORE_BRANCH: "master"
-  # Space-separated list of elements to install as dependencies
   PACKER_VERSION: "1.9.2"
   CORE_ENDPOINT_URL: http://10.20.0.2:11010
   CORE_USERNAME: "admin"
   CORE_PASSWORD: "admin"
+  ELEMENT_NAME: dbaas
 
 jobs:
-  Build:
-    runs-on: [ self-hosted, vm ]
-    if : ${{ github.actor != 'dependabot[bot]' }}
-    strategy:
-      fail-fast: true
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 50
-      - name: Build Exordos DB
-        env:
-            PUSH_CFG: ${{ secrets.PUSH_CFG }}
-        run: |
-          set -eux
-
-          mkdir -p ${ARTIFACTS_PATH}
-
-          VERSION="$(exordos get-version .)"
-
-          exordos build $(pwd)
-
-          # Decode and write the push configuration
-          mkdir -p exordos
-          echo "$PUSH_CFG" | base64 -d > exordos/exordos.push.yaml
-          exordos push -c exordos/exordos.push.yaml -t local -f --latest
-
-          # Temporary upload step is done in the build script
-          echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
-      - name: Upload the build artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: build_artifacts
-          path: artifacts/
-  Func_tests:
-    needs: Build
+  BuildTestPush:
     runs-on: ubuntu-24.04
+    if : ${{ github.actor != 'dependabot[bot]' }}
     steps:
-      - uses: actions/checkout@v6
       - name: Setup `packer`
         uses: hashicorp/setup-packer@main
         with:
           version: ${{ env.PACKER_VERSION }}
       - name: Install exordos
         run: curl -fsSL https://repo.exordos.com/install.sh | sudo sh
+      - name: Install hypervisor
+        run: |
+          sudo exordos compute hypervisors init
+          sudo chmod 666 /dev/kvm
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Build Exordos DB
+        timeout-minutes: 20
+        env:
+          PUSH_EXORDOS_CFG: ${{ secrets.PUSH_EXORDOS_CFG }}
+        run: |
+          set -eux
+          
+          mkdir -p ${ARTIFACTS_PATH}
+
+          VERSION="$(exordos get-version .)"
+          
+          exordos build $(pwd)
+          
+          echo "$PUSH_EXORDOS_CFG" | base64 -d > exordos/exordos.push.yaml
+          exordos push -c exordos/exordos.push.yaml -t exordos_repo -f --latest
+          
+          echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
+      - name: Upload the build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build_artifacts
+          path: artifacts/
       - name: set exordos config
         run: |
           exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
           exordos settings set-context default --name default --user $CORE_USERNAME --password $CORE_PASSWORD
-      - name: Install hypervisor
-        run: sudo exordos compute hypervisors init
       - name: Bootstrap exordos_core
-        run: exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
+        run:
+          exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
       - name: Wait for Exordos Core API
-        run: |
+        run: |    
           for i in {1..60}; do
-            if curl -s -o /dev/null -w "%{http_code}" http://10.20.0.2:11010 | grep -q "200\|401\|403"; then
+            if exordos ready_api; then
               echo "Exordos Core API is ready"
-              exit 0
+              break
             fi
             echo "Waiting for Exordos Core API... ($i/60)"
             sleep 5
           done
-          echo "Exordos Core API did not become ready"
-          exit 1
       - name: Set hypervisor with overbooking
-        run: |
-          exordos compute hypervisors add -u 63d6caf1-c452-4697-9d03-b4579612c1f5 -m VM --cores_ratio 10.0 --ram_ratio 10.0 -d driver=libvirt -d iface_mtu=1500 -d network_type=network -d network=exordos-core-net -d storage_pool=default -d connection_uri=qemu+tcp://10.20.0.1/system -d machine_prefix=dev-
+        run: |    
+          HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."UUID")"
+          exordos compute hypervisors update $HYPER_UUID --cores_ratio 10.0 --ram_ratio 10.0
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -88,16 +81,17 @@ jobs:
       - name: install dbaas
         run: |
           VERSION=$(cat artifacts/version.txt)
-          exordos e e install dbaas -v $VERSION
+          exordos e e install $ELEMENT_NAME -v $VERSION
       - name: check exordos dbaas
         timeout-minutes: 10
         run: |
           set -eux
-
-          while [ $(exordos ee l -o json -f name=dbaas | jq -r .[0]."Status") != "ACTIVE" ]; do
+          
+          while [ $(exordos ee l -o json -f name=$ELEMENT_NAME | jq -r .[0]."Status") != "ACTIVE" ]; do
             sleep 5
           done
-          exordos e e show dbaas
+          
+          exordos e e show $ELEMENT_NAME
       - name: Setup upterm session
         uses: owenthereal/action-upterm@v1
         if: ${{ failure() }}
