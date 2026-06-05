@@ -168,21 +168,21 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
             cfg.StrOpt(
                 "core_username",
                 default="exordos_db",
-                help=("User to work with Core."),
+                help="User to work with Core.",
             ),
             cfg.StrOpt(
                 "core_password",
                 default="exordos_db",
-                help=("User password to work with Core."),
+                help="User password to work with Core.",
             ),
             cfg.StrOpt(
                 "core_api_base_url",
-                default="http://core.local.genesis-core.tech:11010",
-                help=("Core's user api endpoint."),
+                default="http://core.local.genesis-core.tech:80/api/core",
+                help="Core's user api endpoint.",
             ),
             sdk_cfg_types.UuidOpt(
                 "project_id",
-                help=("Project id to work with Core."),
+                help="Project id to work with Core.",
             ),
         ]
 
