@@ -34,6 +34,7 @@ export IAM_USER_NAME="${IAM_USER_NAME:-exordos_db}"
 export IAM_USER_PASS="${IAM_USER_PASS:-exordos_db}"
 export PROJECT_ID="${PROJECT_ID}"
 export GC_HS256_JWKS_ENCRYPTION_KEY="${GC_HS256_JWKS_ENCRYPTION_KEY:-}"
+export AUDIENCE="${AUDIENCE:-}"
 
 export GC_PG_USER="${GC_PG_USER:-exordos_db}"
 export GC_PG_PASS="${GC_PG_PASS:-$(generate_secure_password)}"
