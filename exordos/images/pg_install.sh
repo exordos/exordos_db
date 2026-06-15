@@ -94,7 +94,8 @@ mkdir -p patroni
 cd patroni
 python3 -m venv venv
 source venv/bin/activate
-pip install "psycopg[binary]" "patroni[raft]>=4.1.0"
+# https://github.com/bakwc/PySyncObj/pull/197
+pip install "psycopg[binary]" "patroni[raft]>=4.1.0" "git+https://github.com/gmelikov/PySyncObj.git@reset_fix"
 
 mkdir -p data
 chmod 750 data
