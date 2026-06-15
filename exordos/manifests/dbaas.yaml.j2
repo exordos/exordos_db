@@ -166,6 +166,7 @@ resources:
           IAM_USER_PASS={$core.secret.passwords.$dbaas_user_password:value}
           PROJECT_ID={$core.iam.projects.$dbaas_project:uuid}
           GC_HS256_JWKS_ENCRYPTION_KEY={$dbaas.imports.$var_hs256_jwks_encryption_key:value}
+          AUDIENCE={$dbaas.imports.$var_iam_default_client_id:value}
           "
 
   # DBaaS
@@ -193,6 +194,10 @@ imports:
     element: "$core"
     kind: "resource"
     link: "$core.vs.variables.$hs256_jwks_encryption_key"
+  var_iam_default_client_id:
+    element: "$core"
+    kind: "resource"
+    link: "$core.vs.variables.$iam_default_client_id"
 
 exports:
   pg18:
