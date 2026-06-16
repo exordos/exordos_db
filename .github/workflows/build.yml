@@ -7,7 +7,7 @@ env:
   ARTIFACTS_PATH: artifacts
   CORE_BRANCH: "master"
   PACKER_VERSION: "1.9.2"
-  CORE_ENDPOINT_URL: http://10.20.0.2:11010
+  CORE_ENDPOINT_URL: http://10.20.0.2:80/api/core
   CORE_USERNAME: "admin"
   CORE_PASSWORD: "admin"
   ELEMENT_NAME: dbaas
@@ -72,7 +72,7 @@ jobs:
       - name: Set hypervisor with overbooking
         run: |    
           HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."UUID")"
-          exordos compute hypervisors update $HYPER_UUID --cores_ratio 10.0 --ram_ratio 10.0
+          exordos compute hypervisors update $HYPER_UUID --cores-ratio 10.0 --ram-ratio 10.0
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
