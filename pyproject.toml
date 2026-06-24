@@ -33,7 +33,7 @@ homepage = "https://github.com/exordos/exordos_db/"
 [build-system]
 requires = [
     "setuptools>=82.0.1",
-    "setuptools_scm>=10.0.5"
+    "setuptools_scm>=10.1.2"
 ]
 build-backend = "setuptools.build_meta"
 
