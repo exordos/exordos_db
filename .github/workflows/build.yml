@@ -6,6 +6,8 @@ on:
 env:
   ARTIFACTS_PATH: artifacts
   CORE_BRANCH: "master"
+  # Space-separated list of elements to install as dependencies
+  ELEMENT_DEPS: ""
   PACKER_VERSION: "1.9.2"
   CORE_ENDPOINT_URL: http://10.20.0.2:80/api/core
   CORE_USERNAME: "admin"
@@ -36,16 +38,16 @@ jobs:
           PUSH_EXORDOS_CFG: ${{ secrets.PUSH_EXORDOS_CFG }}
         run: |
           set -eux
-          
+
           mkdir -p ${ARTIFACTS_PATH}
 
           VERSION="$(exordos get-version .)"
-          
+
           exordos build $(pwd)
-          
+
           echo "$PUSH_EXORDOS_CFG" | base64 -d > exordos/exordos.push.yaml
           exordos push -c exordos/exordos.push.yaml -t exordos_repo -f --latest
-          
+
           echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
       - name: Upload the build artifacts
         uses: actions/upload-artifact@v7
@@ -60,7 +62,7 @@ jobs:
         run:
           exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
       - name: Wait for Exordos Core API
-        run: |    
+        run: |
           for i in {1..60}; do
             if exordos ready_api; then
               echo "Exordos Core API is ready"
@@ -70,9 +72,14 @@ jobs:
             sleep 5
           done
       - name: Set hypervisor with overbooking
-        run: |    
-          HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."UUID")"
+        run: |
+          HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."uuid")"
           exordos compute hypervisors update $HYPER_UUID --cores-ratio 10.0 --ram-ratio 10.0
+      - name: Preload dependencies in background
+        run: |
+          for dep in $ELEMENT_DEPS; do
+            exordos e elements install $dep
+          done
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -86,11 +93,11 @@ jobs:
         timeout-minutes: 10
         run: |
           set -eux
-          
-          while [ $(exordos ee l -o json -f name=$ELEMENT_NAME | jq -r .[0]."Status") != "ACTIVE" ]; do
+
+          while [ $(exordos ee l -o json -f name=$ELEMENT_NAME | jq -r .[0]."status") != "ACTIVE" ]; do
             sleep 5
           done
-          
+
           exordos e e show $ELEMENT_NAME
       - name: Setup upterm session
         uses: owenthereal/action-upterm@v1
