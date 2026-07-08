@@ -599,7 +599,7 @@ requires-dist = [
     { name = "ruamel-yaml", marker = "extra == 'test'", specifier = "==0.19.1" },
     { name = "ruff", marker = "extra == 'ruff'" },
     { name = "shellcheck-py", marker = "extra == 'shellcheck'" },
-    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.55.1" },
+    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.56.3" },
     { name = "tox-uv", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev", "test", "mypy", "ruff", "shellcheck", "docs"]
@@ -1884,7 +1884,7 @@ wheels = [
 
 [[package]]
 name = "tox"
-version = "4.55.1"
+version = "4.56.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -1900,9 +1900,9 @@ dependencies = [
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
     { name = "virtualenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/79/5b/4f09156a3f7bf3c4fa23212717f097c59126d81e2c557e6fd872a62db38a/tox-4.55.1.tar.gz", hash = "sha256:0678fbf26dd5b559b1ef128fa4388325920219322ebc8cc5f3497627c00f4472", size = 280676, upload-time = "2026-06-03T20:01:03.487Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/81/b75cc8da0c83eb78fe9fcefb572ecd6f3ebdf5af46b9a04114c81f02db94/tox-4.56.3.tar.gz", hash = "sha256:6eaaf5258114e736cca7ca8423e84234fce910b7889ea0fb92b1df28cb4c31aa", size = 286614, upload-time = "2026-07-08T17:02:21.726Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/fd/394f00f3d3e23d87eb7b20276d88fe835e48780d3eb30e6f362428bb80c8/tox-4.55.1-py3-none-any.whl", hash = "sha256:e2084be6dfdef96ba1bed4948e6a1f73613d6952e1477be5dca45653d4c053c8", size = 215360, upload-time = "2026-06-03T20:01:01.967Z" },
+    { url = "https://files.pythonhosted.org/packages/12/7c/b32ea539fb2e3948f09c32c0c7b06543afd5c4a454b73cb31e11e90be461/tox-4.56.3-py3-none-any.whl", hash = "sha256:d3274970e82f8ec3e3a9d5acfa19ee507574193ead81f01d177e7f78edbe7746", size = 217461, upload-time = "2026-07-08T17:02:19.979Z" },
 ]
 
 [[package]]
