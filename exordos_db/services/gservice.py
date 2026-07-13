@@ -83,6 +83,7 @@ class UAgent(agent_service.UniversalAgentService, oslo_base.OsloConfigurableServ
             caps_drivers=caps_drivers,
             facts_drivers=facts_drivers,
             payload_path=payload_path,
+            verify_node_on_register=False,
             **kwargs,
         )
 
