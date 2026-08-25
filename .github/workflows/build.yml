@@ -9,6 +9,8 @@ env:
   # Space-separated list of elements to install as dependencies
   ELEMENT_DEPS: ""
   PACKER_VERSION: "1.9.2"
+  # Keep the base images packer downloads out of the workspace so they can be cached
+  PACKER_CACHE_DIR: /home/runner/packer_cache
   CORE_ENDPOINT_URL: http://10.20.0.2:80/api/core
   CORE_USERNAME: "admin"
   CORE_PASSWORD: "admin"
@@ -19,23 +21,41 @@ jobs:
     runs-on: ubuntu-24.04
     if : ${{ github.actor != 'dependabot[bot]' }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Setup `packer`
         uses: hashicorp/setup-packer@main
         with:
           version: ${{ env.PACKER_VERSION }}
+      - name: Cache packer base images
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PACKER_CACHE_DIR }}
+          key: packer-base-${{ hashFiles('exordos/exordos.yaml') }}
+          restore-keys: packer-base-
       - name: Install exordos
         run: curl -fsSL https://repo.exordos.com/install.sh | sudo sh
       - name: Install hypervisor
         run: |
           sudo exordos compute hypervisors init
           sudo chmod 666 /dev/kvm
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      # The core installation does not depend on the element build, so bootstrap
+      # it in the background and let it run while the images are being built.
+      - name: Bootstrap exordos_core in background
+        run: |
+          set -eux
+
+          exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
+          exordos settings set-context default --name default --user $CORE_USERNAME --password $CORE_PASSWORD
+
+          nohup bash -c '
+            exordos bootstrap -i latest -f -m core \
+              --admin-password '"$CORE_PASSWORD"' --cidr 10.20.0.0/22
+            echo $? > /tmp/bootstrap.rc
+          ' > /tmp/bootstrap.log 2>&1 &
       - name: Build Exordos DB
         timeout-minutes: 20
-        env:
-          PUSH_EXORDOS_CFG: ${{ secrets.PUSH_EXORDOS_CFG }}
         run: |
           set -eux
 
@@ -45,32 +65,44 @@ jobs:
 
           exordos build $(pwd)
 
-          echo "$PUSH_EXORDOS_CFG" | base64 -d > exordos/exordos.push.yaml
-          exordos push -c exordos/exordos.push.yaml -t exordos_repo -f --latest
-
           echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+      # Publishing the images takes minutes and nothing below needs them, so it
+      # runs in the background and is only awaited at the end of the job.
+      - name: Push element to the repository in background
+        env:
+          PUSH_EXORDOS_CFG: ${{ secrets.PUSH_EXORDOS_CFG }}
+        run: |
+          set -eu
+
+          echo "$PUSH_EXORDOS_CFG" | base64 -d > exordos/exordos.push.yaml
+
+          nohup bash -c '
+            exordos push -c exordos/exordos.push.yaml -t exordos_repo -f --latest
+            echo $? > /tmp/push.rc
+          ' > /tmp/push.log 2>&1 &
       - name: Upload the build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: build_artifacts
           path: artifacts/
-      - name: set exordos config
-        run: |
-          exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
-          exordos settings set-context default --name default --user $CORE_USERNAME --password $CORE_PASSWORD
-      - name: Bootstrap exordos_core
-        run:
-          exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
       - name: Wait for Exordos Core API
+        timeout-minutes: 10
         run: |
-          for i in {1..60}; do
-            if exordos ready_api; then
-              echo "Exordos Core API is ready"
-              break
-            fi
-            echo "Waiting for Exordos Core API... ($i/60)"
-            sleep 5
+          while [ ! -f /tmp/bootstrap.rc ]; do
+            sleep 3
           done
+          cat /tmp/bootstrap.log
+          if [ "$(cat /tmp/bootstrap.rc)" != "0" ]; then
+            echo "Bootstrap of exordos_core failed"
+            exit 1
+          fi
+
+          until exordos ready_api; do
+            echo "Waiting for Exordos Core API..."
+            sleep 3
+          done
+          echo "Exordos Core API is ready"
       - name: Set hypervisor with overbooking
         run: |
           HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."uuid")"
@@ -80,25 +112,41 @@ jobs:
           for dep in $ELEMENT_DEPS; do
             exordos e elements install $dep
           done
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: build_artifacts
-          path: artifacts/
       - name: install dbaas
         run: |
-          VERSION=$(cat artifacts/version.txt)
-          exordos e e install $ELEMENT_NAME -v $VERSION
+          set -eux
+
+          MANIFEST="output/manifests/${ELEMENT_NAME}.yaml"
+          if [ -f "$MANIFEST" ]; then
+            # Install what has just been built locally, no need to wait for the push
+            exordos e e install "$MANIFEST"
+          else
+            # Fall back to the published element
+            while [ ! -f /tmp/push.rc ]; do
+              sleep 5
+            done
+            cat /tmp/push.log
+            [ "$(cat /tmp/push.rc)" = "0" ] || exit 1
+            exordos e e install $ELEMENT_NAME -v $VERSION
+          fi
       - name: check exordos dbaas
         timeout-minutes: 10
         run: |
           set -eux
 
           while [ $(exordos ee l -o json -f name=$ELEMENT_NAME | jq -r .[0]."status") != "ACTIVE" ]; do
-            sleep 5
+            sleep 3
           done
 
           exordos e e show $ELEMENT_NAME
+      - name: Wait for the element push
+        timeout-minutes: 15
+        run: |
+          while [ ! -f /tmp/push.rc ]; do
+            sleep 5
+          done
+          cat /tmp/push.log
+          exit "$(cat /tmp/push.rc)"
       - name: Setup upterm session
         uses: owenthereal/action-upterm@v1
         if: ${{ failure() }}
