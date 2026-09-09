@@ -20,13 +20,16 @@ import os
 import typing as tp
 
 from gcl_looper.services.oslo import base as oslo_base
+from gcl_sdk.agents.universal import constants as ua_c
 from gcl_sdk.agents.universal import utils as ua_utils
 from gcl_sdk.agents.universal.clients.orch import db as orch_db
+from gcl_sdk.agents.universal.dm import models as ua_models
 from gcl_sdk.agents.universal.drivers import core as core_drivers
 from gcl_sdk.agents.universal.services import agent as agent_service
 from gcl_sdk.agents.universal.services import scheduler as scheduler_service
 from gcl_sdk.common.oslo import types as sdk_cfg_types
 from oslo_config import cfg
+from restalchemy.common import contexts
 
 from exordos_db.common import constants as cc
 
@@ -85,6 +88,34 @@ class UAgent(agent_service.UniversalAgentService, oslo_base.OsloConfigurableServ
             payload_path=payload_path,
             **kwargs,
         )
+
+    def _setup(self):
+        # The agent registers itself only if its node is known, i.e. the
+        # node has an encryption key. The CP host is not a managed node,
+        # so nothing mirrors a key for it from Core the way
+        # CoreInfraBuilder does for the PG instance nodes - provision one
+        # here so registration can go through. Seed it with the key
+        # already deployed on this host, otherwise the DB copy would
+        # differ from the one the CP host encrypts with.
+        with contexts.Context().session_manager() as session:
+            ua_models.NodeEncryptionKey.get_or_create(
+                ua_utils.system_uuid(),
+                private_key=self._read_private_key(),
+                session=session,
+            )
+
+        super()._setup()
+
+    @staticmethod
+    def _read_private_key() -> str:
+        """Return the key deployed on this host.
+
+        A missing key file means the host was never provisioned with
+        one, so any key put in the DB would differ from what the CP
+        host encrypts with - fail loudly instead.
+        """
+        with open(ua_c.PRIVATE_KEY_PATH) as f:
+            return f.read().strip()
 
     @classmethod
     def svc_get_config_opts(cls) -> tp.Collection[cfg.Opt]:
