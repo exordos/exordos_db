@@ -4,8 +4,6 @@ on:
   push:
 
 env:
-  ARTIFACTS_PATH: artifacts
-  CORE_BRANCH: "master"
   # Space-separated list of elements to install as dependencies
   ELEMENT_DEPS: ""
   PACKER_VERSION: "1.9.2"
@@ -15,9 +13,38 @@ env:
   ELEMENT_NAME: dbaas
 
 jobs:
-  BuildTestPush:
+  Build:
+    runs-on: [ self-hosted, vm ]
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    strategy:
+      fail-fast: true
+    outputs:
+      dbaas_version: ${{ steps.build_element.outputs.dbaas_version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Build Element
+        id: build_element
+        env:
+          PUSH_CFG: ${{ secrets.PUSH_CFG }}
+        run: |
+          set -eux
+
+          VERSION="$(exordos get-version .)"
+          echo "dbaas_version=${VERSION}" >> $GITHUB_OUTPUT
+          
+          exordos build $(pwd)
+
+          # Decode and write the push configuration
+          echo "$PUSH_CFG" | base64 -d > exordos/exordos.push.yaml
+          exordos push -c exordos/exordos.push.yaml -t local -f --latest
+  Test:
     runs-on: ubuntu-24.04
+    needs: Build
     if : ${{ github.actor != 'dependabot[bot]' }}
+    env:
+      DBAAS_VERSION: ${{ needs.Build.outputs.dbaas_version }}
     steps:
       - name: Setup `packer`
         uses: hashicorp/setup-packer@main
@@ -27,33 +54,22 @@ jobs:
         run: curl -fsSL https://repo.exordos.com/install.sh | sudo sh
       - name: Install hypervisor
         run: |
-          sudo exordos compute hypervisors init
+          set -eux
+
+          # Prefetch the core artifacts into ~/.cache/exordos while the
+          # hypervisor packages are being installed: both steps are
+          # independent and each takes around half a minute.
+          exordos bootstrap -i latest -m core --download-only > prefetch.log 2>&1 &
+          PREFETCH_PID=$!
+
+          sudo exordos compute hypervisors init --connection-uri qemu+tcp://10.20.0.1/system
           sudo chmod 666 /dev/kvm
+          
+          wait $PREFETCH_PID || { cat prefetch.log; exit 1; }
+          cat prefetch.log
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Build Exordos DB
-        timeout-minutes: 20
-        env:
-          PUSH_EXORDOS_CFG: ${{ secrets.PUSH_EXORDOS_CFG }}
-        run: |
-          set -eux
-
-          mkdir -p ${ARTIFACTS_PATH}
-
-          VERSION="$(exordos get-version .)"
-
-          exordos build $(pwd)
-
-          echo "$PUSH_EXORDOS_CFG" | base64 -d > exordos/exordos.push.yaml
-          exordos push -c exordos/exordos.push.yaml -t exordos_repo -f --latest
-
-          echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
-      - name: Upload the build artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: build_artifacts
-          path: artifacts/
       - name: set exordos config
         run: |
           exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
@@ -63,13 +79,23 @@ jobs:
           exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
       - name: Wait for Exordos Core API
         run: |
+          set -eux
+          
           for i in {1..60}; do
             if exordos ready_api; then
               echo "Exordos Core API is ready"
               break
             fi
+            if [ "$i" -eq 60 ]; then
+              echo "Exordos Core API did not become ready"
+              exit 1
+            fi
             echo "Waiting for Exordos Core API... ($i/60)"
-            sleep 5
+            sleep 2
+          done
+          
+          while [ $(exordos ee l -o json -f name=core | jq -r .[0]."status") != "ACTIVE" ]; do
+            sleep 2
           done
       - name: Set hypervisor with overbooking
         run: |
@@ -80,15 +106,9 @@ jobs:
           for dep in $ELEMENT_DEPS; do
             exordos e elements install $dep
           done
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: build_artifacts
-          path: artifacts/
       - name: install dbaas
         run: |
-          VERSION=$(cat artifacts/version.txt)
-          exordos e e install $ELEMENT_NAME -v $VERSION
+          exordos e e install $ELEMENT_NAME -v $DBAAS_VERSION
       - name: check exordos dbaas
         timeout-minutes: 10
         run: |
