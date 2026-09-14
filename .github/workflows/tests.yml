@@ -26,3 +26,5 @@ jobs:
       - name: ruff
         run: |
           tox -e ruff-check
+      - name: Unit tests
+        run: tox -e py312

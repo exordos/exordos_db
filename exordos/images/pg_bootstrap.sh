@@ -20,11 +20,16 @@ set -eu
 set -x
 set -o pipefail
 
-source /usr/local/lib/exordos/lib_bootstrap.sh
+BOOTSTRAP_LIB=${EXORDOS_BOOTSTRAP_LIB:-/usr/local/lib/exordos/lib_bootstrap.sh}
+source "$BOOTSTRAP_LIB"
+
+# Keep Patroni stopped across BOTH migrations: restarting between data and
+# Raft would leave open file descriptors on the filesystem being replaced.
+sudo systemctl stop exordos-patroni
 
 # persistent data routines
 PERSISTENT_DISK=$(find_persistent_disk)
-prepare_persistent_disk "$(find_persistent_disk)" "$PERSISTENT_MOUNT"
+prepare_persistent_disk "$PERSISTENT_DISK" "$PERSISTENT_MOUNT"
 
 if [[ -n "$PERSISTENT_DISK" ]]; then
     # Migrate logs first, some processes may be left writing to root disk until next reboot

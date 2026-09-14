@@ -63,6 +63,9 @@ deactivate
 
 # Install Systemd service files
 sudo cp "$GC_PATH/etc/systemd/exordos-db-pg-agent.service" $SYSTEMD_SERVICE_DIR
+sudo mkdir -p "${SYSTEMD_SERVICE_DIR}/exordos-universal-agent.service.d"
+sudo cp "$GC_PATH/etc/systemd/exordos-universal-agent.service.d/pg-bootstrap.conf" \
+    "${SYSTEMD_SERVICE_DIR}/exordos-universal-agent.service.d/pg-bootstrap.conf"
 
 # Enable exordos db services
 sudo systemctl enable exordos-db-pg-agent
