@@ -90,6 +90,10 @@ class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
     def validate(self) -> None:
         check_endpoint_host(self.endpoint)
 
+    def repository(self) -> tuple[str, str, str]:
+        """Where the repository is, regardless of the credentials to it."""
+        return (self.endpoint.rstrip("/"), self.bucket, self.path)
+
     def storage_repo_options(self) -> dict[str, str]:
         """Return pgBackRest `repo1-*` options to reach the repository."""
         options = {

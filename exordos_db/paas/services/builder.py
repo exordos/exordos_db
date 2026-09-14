@@ -24,6 +24,7 @@ from gcl_sdk.agents.universal.dm import models as ua_models
 from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.paas.services import builder
 
+from exordos_db.common import rollback
 from exordos_db.paas.dm import models
 from exordos_db.paas.services import roles
 from exordos_db.user_api.dm import models as user_models
@@ -39,6 +40,41 @@ def rollback_id(instance: models.PGInstance) -> str | None:
     if instance.rollback_revision is None:
         return None
     return str(instance.rollback_revision)
+
+
+def restore_status(
+    instance: models.PGInstance,
+    actuals: tp.Iterable[models.PGInstanceNode | None],
+) -> dict[str, tp.Any] | None:
+    """Sum up what the nodes report about the restore or rollback in progress.
+
+    Only reports of the current request count: of the rollback the instance
+    asks for, or of the restore of a new instance when it asks for none.
+    """
+    requested = rollback_id(instance)
+    reports = [
+        actual.restore_state
+        for actual in actuals
+        if actual is not None
+        and actual.restore_state is not None
+        and actual.restore_state.get("id") == requested
+    ]
+    if not reports:
+        return None
+    # A failure on any node, then the node leading a rollback: replicas only
+    # report they are stopped
+    report = next(
+        (r for r in reports if r.get("error")),
+        next(
+            (r for r in reports if r.get("phase") != rollback.Phase.STOPPED.value),
+            reports[0],
+        ),
+    )
+    return {
+        "revision": instance.rollback_revision,
+        "phase": report.get("phase"),
+        "error": report.get("error"),
+    }
 
 
 class PaaSBuilder(builder.PaaSBuilder):
@@ -201,11 +237,22 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             plan.delete_users,
         )
 
+    @staticmethod
+    def _update_restore_status(
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        status = restore_status(instance, paas_collection.actuals())
+        if status != instance.restore_status:
+            instance.restore_status = status
+            instance.update(force=True)
+
     def actualize_paas_objects_source_data_plane(
         self,
         instance: models.PGInstance,
         paas_collection: builder.PaaSCollection,
     ) -> tp.Collection[ua_models.TargetResourceKindAwareMixin]:
+        self._update_restore_status(instance, paas_collection)
         if not self._roles_managed(instance):
             self._import_roles(instance, paas_collection)
         return super().actualize_paas_objects_source_data_plane(

@@ -61,6 +61,21 @@ def test_found_roles_change_the_full_hash_only():
     assert "roles_unmanaged" in found.get_meta_fields()
 
 
+def test_restore_state_changes_the_full_hash_only():
+    # Reported while a differing target field would make the agent apply the
+    # target instead, like the found roles
+    resource = ua_models.Resource.from_value(UNMANAGED_ROLES, "pg_instance_node")
+    idle = pg.PGInstance.from_ua_resource(resource)
+    failed = pg.PGInstance.from_ua_resource(resource)
+    failed.restore_state = {"id": None, "phase": "failed", "error": "No backup"}
+
+    idle_resource = idle.to_ua_resource("pg_instance_node")
+    failed_resource = failed.to_ua_resource("pg_instance_node")
+
+    assert failed_resource.hash == idle_resource.hash
+    assert failed_resource.full_hash != idle_resource.full_hash
+
+
 def test_managed_roles():
     value = {
         **UNMANAGED_ROLES,

@@ -36,7 +36,8 @@ ALTER TABLE postgres_instances
     ADD COLUMN backup JSONB,
     ADD COLUMN restore_from JSONB,
     ADD COLUMN roles_imported BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN rollback_revision INT;
+    ADD COLUMN rollback_revision INT,
+    ADD COLUMN restore_status JSONB;
 """,
             # Users imported from a restored cluster have only a hash
             "ALTER TABLE postgres_users ALTER COLUMN password DROP NOT NULL;",
@@ -64,6 +65,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS postgres_databases_instance_name_idx
             "ALTER TABLE postgres_users ALTER COLUMN password SET NOT NULL;",
             """\
 ALTER TABLE postgres_instances
+    DROP COLUMN IF EXISTS restore_status,
     DROP COLUMN IF EXISTS rollback_revision,
     DROP COLUMN IF EXISTS roles_imported,
     DROP COLUMN IF EXISTS restore_from,

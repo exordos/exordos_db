@@ -154,6 +154,20 @@ def bootstraps_from_backup(instance: models.PGInstance) -> bool:
     return instance.restore_from is not None and instance.rollback_revision is None
 
 
+def instance_status(instance: models.PGInstance, nodeset_status: str) -> str:
+    if instance.restore_failed():
+        # Until a rollback with a higher revision replaces the failed one, or
+        # a retried restore succeeds
+        return sdk_c.InstanceStatus.ERROR.value
+    # A restore or a rollback isn't over until the roles are matched
+    if not instance.roles_managed():
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+    try:
+        return sdk_c.InstanceStatus(nodeset_status).value
+    except ValueError:
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+
+
 def bootstrap_method(instance: models.PGInstance) -> str:
     return RESTORE_BOOTSTRAP_METHOD if bootstraps_from_backup(instance) else ""
 
@@ -332,13 +346,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                     target.get_resource_kind(),
                 )
 
-        try:
-            instance.status = sdk_c.InstanceStatus(nodeset.status).value
-        except ValueError:
-            instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
-        # A restore or a rollback isn't over until the roles are matched
-        if not instance.roles_managed():
-            instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
+        instance.status = instance_status(instance, nodeset.status)
 
         return (tgt_nodeset, *new_objects)
 

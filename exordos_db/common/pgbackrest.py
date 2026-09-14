@@ -52,6 +52,11 @@ RESTORE_SPEC_FILE = f"{CONF_DIR}/exordos_restore.json"
 # The restore config is referenced by restore_command until the recovery
 # ends, so it lives next to the data until the agent sees a primary
 RESTORE_CONF_FILE = f"{cc.PATRONI_DIR}/pgbackrest-restore.conf"
+# The progress of the restore a cluster is bootstrapped with, see
+# exordos_db.cmd.pg_restore; removed once the node is a primary
+RESTORE_STATE_FILE = f"{cc.PATRONI_DIR}/exordos_restore_state.json"
+# Errors reach the API, a pgBackRest error may be long
+ERROR_MAX_LENGTH = 1024
 # Fingerprint of the repository the stanza was created in on this node
 STANZA_MARKER_FILE = f"{cc.WORK_DIR}/backup_stanza.sha256"
 
@@ -184,6 +189,25 @@ def write_restore_config(spec: dict[str, tp.Any]) -> None:
 
 def remove_restore_config() -> bool:
     return files.remove(RESTORE_CONF_FILE)
+
+
+def error_text(error: BaseException | str) -> str:
+    """Shorten an error to report it to the control plane."""
+    text = str(error).strip()
+    return text if len(text) <= ERROR_MAX_LENGTH else f"{text[:ERROR_MAX_LENGTH]}..."
+
+
+def load_restore_state() -> dict[str, tp.Any] | None:
+    return files.read_json(RESTORE_STATE_FILE)
+
+
+def save_restore_state(state: dict[str, tp.Any]) -> None:
+    # Written by the bootstrap running as postgres, no credentials in it
+    files.write_json(RESTORE_STATE_FILE, state)
+
+
+def remove_restore_state() -> bool:
+    return files.remove(RESTORE_STATE_FILE)
 
 
 def restore_args(spec: dict[str, tp.Any], backup_set: str) -> list[str]:

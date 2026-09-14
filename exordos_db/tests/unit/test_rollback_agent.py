@@ -312,3 +312,124 @@ def test_job_doesnt_log_the_credentials(monkeypatch, caplog):
 
     assert pg_rollback.main() == 1
     assert "secret" not in caplog.text
+
+
+class ReplicaPatroni(FakePatroni):
+    def is_primary(self, ttl_hash=None):
+        return False
+
+
+def test_rollback_progress_is_reported(monkeypatch):
+    rollback.save_state(SPEC, Phase.FAILED, error="x" * 5000)
+    instance = _instance(monkeypatch, FakePatroni())
+
+    instance.restore_from_dp()
+
+    assert instance.restore_state == {
+        "id": "1",
+        "phase": "failed",
+        "error": "x" * pg.pgbackrest.ERROR_MAX_LENGTH + "...",
+    }
+    assert instance.users is None
+    assert instance.found_roles is None
+
+
+def test_progress_is_on_the_updated_target(monkeypatch):
+    # While the node differs from the target the agent reports what the
+    # update returns, not what is read back from the node
+    rollback.save_state(SPEC, Phase.FAILED, error="No backup")
+    instance = _instance(monkeypatch, FakePatroni())
+
+    instance.update_on_dp()
+    resource = instance.to_ua_resource("pg_instance_node")
+
+    assert resource.value["restore_state"] == {
+        "id": "1",
+        "phase": "failed",
+        "error": "No backup",
+    }
+
+
+@pytest.fixture
+def bootstrap_state(tmp_path, monkeypatch):
+    path = tmp_path / "restore_state.json"
+    monkeypatch.setattr(pg.pgbackrest, "RESTORE_STATE_FILE", str(path))
+    pg.pgbackrest.save_restore_state(
+        {"phase": "failed", "error": "No backup", "attempts": 1}
+    )
+    return path
+
+
+BOOTSTRAPPING = [{"name": "a", "role": "replica", "state": "starting"}]
+
+
+def test_bootstrap_progress_is_reported(monkeypatch, bootstrap_state):
+    # PostgreSQL isn't up while the cluster is restored, and no node leads it
+    instance = _instance(monkeypatch, ReplicaPatroni(members=BOOTSTRAPPING))
+    instance.rollback = None
+
+    instance.restore_from_dp()
+
+    assert instance.restore_state == {
+        "id": None,
+        "phase": "failed",
+        "error": "No backup",
+    }
+    assert instance.users is None
+
+
+class DownPatroni(FakePatroni):
+    def is_primary(self, ttl_hash=None):
+        raise pg.requests.ConnectionError("Connection refused")
+
+    def cluster(self):
+        raise pg.requests.ConnectionError("Connection refused")
+
+
+def test_failed_bootstrap_is_reported_while_patroni_restarts(
+    monkeypatch, bootstrap_state
+):
+    # Patroni restarts over and over after a failed bootstrap. The agent
+    # failed to create the resource on the refused connection, and the
+    # failure never reached the control plane.
+    instance = _instance(monkeypatch, DownPatroni())
+    instance.rollback = None
+
+    instance.dump_to_dp()
+
+    assert instance.restore_state == {
+        "id": None,
+        "phase": "failed",
+        "error": "No backup",
+    }
+
+
+def test_patroni_down_without_a_bootstrap_still_fails(monkeypatch):
+    # Nothing is known to be reported then: the agent retries the update
+    instance = _instance(monkeypatch, DownPatroni())
+    instance.rollback = None
+
+    with pytest.raises(pg.requests.ConnectionError):
+        instance.dump_to_dp()
+
+
+def test_bootstrap_state_goes_once_the_node_is_a_primary(monkeypatch, bootstrap_state):
+    instance = _instance(monkeypatch, FakePatroni())
+
+    assert instance._bootstrap_state() is None
+    assert not bootstrap_state.exists()
+
+
+def test_bootstrap_state_goes_on_a_replica_of_another_leader(
+    monkeypatch, bootstrap_state
+):
+    # The bootstrap failed here and another node bootstrapped the cluster: a
+    # stale failure would keep a healthy instance ERROR for good
+    members = [
+        {"name": "a", "role": "replica", "state": "streaming"},
+        {"name": "b", "role": "leader", "state": "running"},
+    ]
+    instance = _instance(monkeypatch, ReplicaPatroni(members=members))
+
+    assert instance._bootstrap_state() is None
+    assert not bootstrap_state.exists()

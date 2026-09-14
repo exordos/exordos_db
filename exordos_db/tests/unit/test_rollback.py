@@ -279,13 +279,10 @@ def test_state_roundtrip(tmp_path, monkeypatch):
         "spec": SPEC,
         "error": "boom",
     }
-    assert rollback.in_progress(SPEC)
-    assert not rollback.in_progress({**SPEC, "id": "other"})
 
     rollback.mark_applied(SPEC["id"])
     assert rollback.applied_id() == SPEC["id"]
     assert rollback.load_state() is None
-    assert not rollback.in_progress(SPEC)
     # The spec is rendered again for every target, so nothing of it, and none
     # of the repository credentials in it, is kept on the node
     assert set(rollback.load_marker()) == {"id", "applied_at"}

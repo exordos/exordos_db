@@ -175,6 +175,12 @@ class PGInstance(meta.MetaDataPlaneModel):
     # plane learns about changes on the data plane, while a differing target
     # field would make the agent apply the target instead of reporting it.
     found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # {"id": <rollback id or None for the bootstrap>, "phase": ..., "error": ...}
+    # while a rollback or the restore of a new cluster is in progress. Not a
+    # target field, like found_roles.
+    restore_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     # The requested rollback is kept to know one is in progress while
     # PostgreSQL is down
@@ -520,9 +526,25 @@ WHERE d.datname not in """
             )
         return False
 
+    def _patroni_down(self) -> bool:
+        try:
+            self.c.pclient.is_primary(get_ttl_hash(seconds=20))
+        except requests.RequestException:
+            return True
+        return False
+
     def dump_to_dp(self) -> None:
         self.roles_unmanaged = self.users is None
+        # Patroni restarts over and over after a failed bootstrap: there is
+        # nothing to apply, but the failure has to be reported
+        if pgbackrest.load_restore_state() is None or not self._patroni_down():
+            self._apply()
+        # A node that hasn't converged to the target (a rollback or a restore
+        # in progress) isn't read back: the agent reports the created or
+        # updated target, so the progress has to be on it
+        self.restore_state = self._restore_report(self.rollback)
 
+    def _apply(self) -> None:
         # Nothing else can be applied to a cluster being rolled back
         if not self._reconcile_rollback():
             return
@@ -546,6 +568,7 @@ WHERE d.datname not in """
         # A primary is out of recovery, restore_command is no longer used
         if pgbackrest.remove_restore_config():
             LOG.info("Restore config removed")
+        pgbackrest.remove_restore_state()
 
         # The stanza has to exist before archiving is turned on
         self._reconcile_backup_stanza()
@@ -569,12 +592,61 @@ WHERE d.datname not in """
             spec if spec is not None and spec["id"] == rollback.applied_id() else None
         )
 
+    def _bootstrap_state(self) -> dict[str, tp.Any] | None:
+        """Return the progress of the restore the cluster is bootstrapped with."""
+        state = pgbackrest.load_restore_state()
+        if state is None:
+            return None
+        pclient = self.c.pclient
+        try:
+            primary = pclient.is_primary(get_ttl_hash(seconds=20))
+            members = [] if primary else pclient.cluster().get("members", [])
+        except requests.RequestException:
+            # Patroni restarts after a failed bootstrap
+            return state
+        if primary:
+            # Recovered and promoted
+            pgbackrest.remove_restore_state()
+            return None
+        leader = next(
+            (m for m in members if m.get("role") in rollback.LEADER_ROLES), None
+        )
+        if leader is not None and leader["name"] != pclient.member_name:
+            # Another node bootstrapped the cluster after this one failed to,
+            # this one is its replica now
+            pgbackrest.remove_restore_state()
+            return None
+        return state
+
+    @staticmethod
+    def _report_state(
+        rollback_id: str | None, state: dict[str, tp.Any]
+    ) -> dict[str, tp.Any]:
+        error = state.get("error")
+        return {
+            "id": rollback_id,
+            "phase": state.get("phase"),
+            "error": None if error is None else pgbackrest.error_text(error),
+        }
+
+    def _restore_report(
+        self, spec: dict[str, tp.Any] | None
+    ) -> dict[str, tp.Any] | None:
+        """Return the progress of the rollback `spec` or of the bootstrap."""
+        state = rollback.load_state()
+        if spec is not None and state is not None and state["id"] == spec["id"]:
+            return self._report_state(spec["id"], state)
+        bootstrap = self._bootstrap_state()
+        return None if bootstrap is None else self._report_state(None, bootstrap)
+
     def restore_from_dp(self) -> None:
-        # The rollback in progress is all there is to report, PostgreSQL may
-        # well be down
+        # The rollback or the restore in progress is all there is to report,
+        # PostgreSQL may well be down
         spec = self.rollback
         self.rollback = self._applied_rollback(spec)
-        if rollback.in_progress(spec):
+        report = self._restore_report(spec)
+        self.restore_state = report
+        if report is not None:
             self.users = None
             self.databases = None
             self.found_roles = None

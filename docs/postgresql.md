@@ -227,6 +227,13 @@ the storage and the stanza.
   uses its own stanza, so the source's backups stay intact even in the same
   bucket and `path`.
 
+While the restore is in progress `restore_status` of the instance shows its
+phase (`restoring`, `recovering`). A restore that can't succeed, e.g. no backup
+finished before the target or the archive ends before it, is attempted three
+times and turns the instance into `ERROR` with the reason in
+`restore_status.error`; such an instance has to be deleted and created with
+another target.
+
 ### Rolling an Existing Instance Back
 
 `restore_from` of an existing instance can be changed to roll its data back in
@@ -261,25 +268,47 @@ backups; only the data goes back to the target time.
   instance already has.
 - `stanza` must be the instance's own uuid: another instance's backups have a
   different system identifier, restore those into a new instance.
-- Setting `restore_from` to `null` leaves the data as it is.
+- Setting `restore_from` to `null` leaves the data as it is. It is rejected
+  with `400` until the users and databases are matched *and* `restore_status`
+  is gone: the source is what the nodes are told to restore from, and what
+  leaves the roles unmanaged meanwhile. The instance turns `ACTIVE` once the
+  roles are matched, which the leader alone decides, while a replica may
+  still be rewinding to the new timeline and still needs the source.
 
 The leader restores only the files that differ from the target and
 recovers, and the replicas are rewound to the new timeline. The cluster is
 unavailable meanwhile and restarts once more, briefly, after it. The first
 backup after a rollback is always full.
 
+- The instance has to have `backup` set to the repository of `restore_from`
+  (the same endpoint, bucket and `path`; the keys may differ), since the
+  latest WAL is archived there only. Otherwise the update is rejected with
+  `400`.
 - Before anything is stopped the leader archives the WAL written up to now and
   checks that a backup finished before the target. If either fails, the
   rollback fails with the data untouched.
+- WAL missing from the archive (backups turned off for a while, or dropped
+  while the storage was unreachable) can't be recovered across: a rollback to
+  a target past such a gap stops at the gap after the data has been replaced,
+  and fails.
 - Backups taken past the point a rollback went to, before the rollback
   itself, are on an abandoned timeline and aren't restored from, in place or
   into a new instance. They still count against `retention_full`, and every
   rollback takes a full backup, so after a few rollbacks the earliest point
   to roll back to moves forward.
-- If the restore fails, the cluster stays paused; setting the source again
-  with a higher `revision` starts the rollback over. `revision` has to be
-  higher than every revision used before, including those of instances whose
+- `restore_status` shows the `revision` being applied and the phase of the
+  leader (`paused`, `restoring`, `restored`, `resumed`), or `stopped` before
+  the leader reports and after it is done, until every replica replicates the
+  new timeline.
+- If the restore fails, the cluster stays paused and the instance is `ERROR`
+  with the reason in `restore_status.error`; setting the source again with a
+  higher `revision` starts the rollback over. `revision` has to be higher than
+  every revision used before, including those of instances whose
   `restore_from` was cleared afterwards.
+- A backup that is running when the rollback starts is interrupted, and no
+  backup is taken while the cluster is paused.
+- A target inside the interval an earlier rollback undid gives the data as
+  that rollback left it: the recovery follows the latest timeline.
 - A replica that can't be rewound is cloned from the leader again.
 - A node that wasn't part of the cluster during the rollback (added or
   reinstalled later, or with its agent down) learns from the cluster that it
@@ -294,9 +323,10 @@ backup after a rollback is always full.
 
 Users and databases are part of the data a backup restores. While the cluster
 is restored or rolled back they aren't applied (nothing is created or
-dropped) and the instance is `IN_PROGRESS`. Once the recovery is over the
-agent reports the roles it finds, and DBaaS matches the users and databases of
-the instance to them by name:
+dropped), the instance is `IN_PROGRESS`, and creating, changing or deleting
+users and databases through the API is rejected with `409 Conflict`. Once the
+recovery is over the agent reports the roles it finds, and DBaaS matches the
+users and databases of the instance to them by name:
 
 - a user or database that existed at the target time and still has a row keeps
   the row with its uuid, so manifests referring to it keep working; a user
@@ -346,7 +376,12 @@ unique within an instance.
 1. **NEW**: Instance created, infrastructure provisioning started
 2. **IN_PROGRESS**: Infrastructure being provisioned, PostgreSQL being installed
 3. **ACTIVE**: Instance ready for use
-4. **ERROR**: Provisioning or configuration failed
+4. **ERROR**: Provisioning or configuration failed, or a restore or rollback
+   failed (see `restore_status`)
+
+`restore_status` is read-only: `{"revision", "phase", "error"}` of the restore
+or rollback in progress, `null` when there is none. `revision` is `null` for
+the restore of a new instance.
 
 ### Component Status
 

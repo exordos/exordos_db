@@ -166,6 +166,23 @@ def test_clone_to_the_end_of_the_archive(scenario, instances, s3_storage):
     assert clone.rows() == {"late": 5}
     assert clone.table_exists("junk")
     assert set(clone.users()) == {"app_user", "late_user"}
+    assert clone.instance().get("restore_status") is None
+
+
+def test_clone_without_a_backup_fails(scenario, instances, s3_storage):
+    _require(scenario, "points")
+    clone = instances(
+        "pitr-nobackup",
+        restore_from=_source(
+            scenario, s3_storage, target=_at(scenario["before_backups"])
+        ),
+    )
+
+    clone.wait_status("ERROR")
+
+    status = clone.instance().get("restore_status")
+    assert status["revision"] is None
+    assert "No backup" in status["error"], status
 
 
 @pytest.mark.parametrize(
@@ -176,6 +193,8 @@ def test_clone_to_the_end_of_the_archive(scenario, instances, s3_storage):
         # The end of the archive is the state the instance already has
         {"target": {"kind": "latest"}},
         {"target": {"kind": "time", "time": "2999-01-01T00:00:00Z"}},
+        # Backups go elsewhere: the latest WAL isn't there
+        {"path": "/functional-elsewhere"},
     ],
 )
 def test_invalid_rollback_is_rejected(scenario, s3_storage, change):
@@ -201,6 +220,18 @@ def test_rollback_in_place(scenario, s3_storage):
     }
 
     source.api.call("PUT", source.path, body, expect=200)
+    # The rolled back cluster has no role for a user created meanwhile
+    response = source.api.call(
+        "POST",
+        f"{source.path}/users/",
+        {
+            "name": "during_rollback",
+            "password": "during-rollback-pass-functional",
+            "project_id": fc.PROJECT_ID,
+            "instance": source.path,
+        },
+    )
+    assert response.status_code == 409, response.text
     source.wait_rollback(1)
 
     source.wait_rows({"first": 10, "second": 90})
@@ -369,12 +400,20 @@ def test_failed_rollback_is_recovered_by_a_higher_revision(scenario, s3_storage)
     target = source.now()
     time.sleep(2)
     _append(source, "after failure target", 1)
+    time.sleep(2)
+    # Undone by the rollback that recovers the failed one
+    scenario["undone"] = source.now()
+    time.sleep(2)
 
     # No backup covers the target, the job fails before touching the data
     _rollback(scenario, s3_storage, scenario["before_backups"], revision=5)
     fc.wait_for(
         lambda: source.rollback_phase(leader) == "failed", "the rollback to fail"
     )
+    source.wait_status("ERROR")
+    status = source.instance().get("restore_status")
+    assert status["revision"] == 5
+    assert "No backup" in status["error"], status
     assert source.dcs().get("pause") is True
     # The data of the leader is intact: its PostgreSQL still runs
     assert source.sql("select count(*) from orders", "appdb", ip=leader) == "24"
@@ -389,7 +428,27 @@ def test_failed_rollback_is_recovered_by_a_higher_revision(scenario, s3_storage)
     source.wait_rows(
         {"first": 10, "before recycling": 4, "tail": 6, "before failure": 3}
     )
+    assert source.instance().get("restore_status") is None
     scenario["recovered"] = True
+
+
+def test_rollback_into_an_undone_interval(scenario, s3_storage):
+    _require(scenario, "recovered")
+    source = scenario["source"]
+    # The target lies between the point the last rollback went to and the
+    # rollback itself: that WAL is on the abandoned timeline
+    _append(source, "after recovery", 2)
+    source.archive_now()
+
+    _rollback(scenario, s3_storage, scenario["undone"], revision=7)
+    source.wait_rollback(7)
+
+    # The latest timeline is followed: its history leaves the abandoned one at
+    # the point of the last rollback, and nothing on the new one is older
+    # than the target
+    source.wait_rows(
+        {"first": 10, "before recycling": 4, "tail": 6, "before failure": 3}
+    )
 
 
 def test_repository_errors_dont_hold_up_the_roles(scenario, s3_storage):

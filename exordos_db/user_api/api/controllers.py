@@ -73,12 +73,41 @@ class PGInstanceController(
                 "ipsv4": {constants.ALL: field_p.Permissions.RO},
                 "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
                 "rollback_revision": {constants.ALL: field_p.Permissions.HIDDEN},
+                "restore_status": {constants.ALL: field_p.Permissions.RO},
             },
         ),
     )
 
 
+class RolesLockedMixin:
+    """Reject changes of users and databases while their rows can't be kept.
+
+    The rows of a restored or rolled back instance are matched by name to
+    the roles the recovered cluster has once the recovery is over. A row
+    created meanwhile has no role there and would be deleted, a deleted one
+    would come back.
+    """
+
+    @staticmethod
+    def _check_roles_managed(instance: models.PGInstance) -> None:
+        if not instance.roles_managed():
+            raise models.RolesLockedError(instance=instance.uuid)
+
+    def create(self, parent_resource, **kwargs):
+        self._check_roles_managed(parent_resource)
+        return super().create(parent_resource, **kwargs)
+
+    def update(self, parent_resource, uuid, **kwargs):
+        self._check_roles_managed(parent_resource)
+        return super().update(parent_resource, uuid, **kwargs)
+
+    def delete(self, parent_resource, uuid):
+        self._check_roles_managed(parent_resource)
+        return super().delete(parent_resource, uuid)
+
+
 class PGDatabaseController(
+    RolesLockedMixin,
     iam_controllers.NestedPolicyBasedController,
     ra_controllers.BaseNestedResourceControllerPaginated,
 ):
@@ -94,6 +123,7 @@ class PGDatabaseController(
 
 
 class PGUserController(
+    RolesLockedMixin,
     iam_controllers.NestedPolicyBasedController,
     ra_controllers.BaseNestedResourceControllerPaginated,
 ):

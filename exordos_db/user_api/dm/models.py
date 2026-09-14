@@ -16,6 +16,7 @@
 
 import enum
 import re
+import typing as tp
 import uuid
 
 from gcl_sdk.agents.universal.dm import models as ua_models
@@ -40,6 +41,14 @@ class InstanceUpdateError(ra_exc.ValidationErrorException):
     message = "%(reason)s"
 
 
+class RolesLockedError(ra_exc.RestAlchemyException):
+    code = 409
+    message = (
+        "users and databases of instance %(instance)s can't be changed until "
+        "its restore or rollback is over"
+    )
+
+
 def check_nodes_change(old: int, new: int, roles_managed: bool) -> None:
     # A removed node may be the one leading an unfinished rollback
     if new < old and not roles_managed:
@@ -49,11 +58,38 @@ def check_nodes_change(old: int, new: int, roles_managed: bool) -> None:
         )
 
 
+def check_restore_from_cleared(
+    old: backups.S3RestoreSource | None,
+    new: backups.S3RestoreSource | None,
+    roles_imported: bool,
+    restore_status: dict[str, tp.Any] | None,
+) -> None:
+    # The source of a new instance is what leaves its roles unmanaged until
+    # they are matched. Without it the empty rows would be applied, and the
+    # agent would drop every user and database the restore brings back.
+    #
+    # The source of a rollback is also what its spec is rendered from, and
+    # the roles are matched as soon as the leader reports them, while a
+    # replica may still be rewinding to the new timeline. Taking the spec
+    # away then leaves that replica with no rollback to mark as applied, and
+    # it would take an incremental backup on top of one of the abandoned
+    # timeline when it becomes the primary. Every node reports its phase
+    # until it is done with the rollback, so nothing is left in
+    # `restore_status` once they all are.
+    over = roles_imported and restore_status is None
+    if new is None and old is not None and not over:
+        raise RestoreSourceError(
+            reason="can't be cleared until the restore or the rollback is "
+            "over on every node and the users and databases are matched"
+        )
+
+
 def rollback_for_update(
     instance_uuid: uuid.UUID,
     old: backups.S3RestoreSource | None,
     new: backups.S3RestoreSource | None,
     rollback_revision: int | None,
+    backup: backups.S3Backup | None,
 ) -> int | None:
     """Return the revision an update of `restore_from` rolls the data back with.
 
@@ -85,6 +121,14 @@ def rollback_for_update(
         raise RestoreSourceError(
             reason="an instance can be rolled back in place only to its own "
             "backups, create a new instance to restore another one's"
+        )
+    if backup is None or backup.repository() != new.repository():
+        # The WAL written since the last archived one reaches only the
+        # repository backups go to. Recovering from another one ends before
+        # the target, after the restore has replaced the data.
+        raise RestoreSourceError(
+            reason="an instance is rolled back in place only from the "
+            "repository its backup goes to"
         )
     return new.revision
 
@@ -168,6 +212,13 @@ class PGInstance(
         types.AllowNone(types.Integer(min_value=0, max_value=2**31 - 1)),
         default=None,
     )
+    # {"revision": ..., "phase": ..., "error": ...} of the restore or the
+    # rollback in progress as the nodes report it, None when there is none.
+    # "revision" is None for the restore of a new instance.
+    restore_status = properties.property(types.AllowNone(types.Dict()), default=None)
+
+    def restore_failed(self) -> bool:
+        return self.restore_status is not None and bool(self.restore_status["error"])
 
     def get_users(self, session=None):
         return PGUser.objects.get_all(
@@ -194,11 +245,18 @@ class PGInstance(
         restore_from = self.properties["restore_from"]
         revision = None
         if restore_from.is_dirty():
+            check_restore_from_cleared(
+                restore_from.old_value,
+                self.restore_from,
+                self.roles_imported,
+                self.restore_status,
+            )
             revision = rollback_for_update(
                 self.uuid,
                 restore_from.old_value,
                 self.restore_from,
                 self.rollback_revision,
+                self.backup,
             )
         if revision is not None:
             self.rollback_revision = revision

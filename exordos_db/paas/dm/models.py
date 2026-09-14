@@ -53,6 +53,11 @@ class PGInstanceNode(
     rollback = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
     # Reported by the agent while the roles are unmanaged, not a target field
     found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Reported by the agent while a rollback or a restore is in progress, not
+    # a target field
+    restore_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     @classmethod
     def get_resource_kind(cls) -> str:

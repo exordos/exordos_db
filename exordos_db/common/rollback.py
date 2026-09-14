@@ -157,11 +157,6 @@ def clear_state() -> None:
     files.remove(STATE_FILE)
 
 
-def in_progress(spec: dict[str, tp.Any] | None) -> bool:
-    state = load_state()
-    return spec is not None and state is not None and state["id"] == spec["id"]
-
-
 def run_as_postgres(*cmd: str, check: bool = True) -> subprocess.CompletedProcess:
     LOG.info("Running %s", " ".join(cmd))
     return subprocess.run(
