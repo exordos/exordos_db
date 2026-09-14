@@ -58,7 +58,7 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
         )
 
     OnReloadFunc = sdk_models.OnChangeShell(
-        command="systemctl try-reload-or-restart exordos-patroni"
+        command="systemctl reload-or-restart exordos-patroni"
     )
 
     def _create_config(self, node_uuid, project_id, content=""):

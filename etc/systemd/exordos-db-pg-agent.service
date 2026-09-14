@@ -1,6 +1,7 @@
 [Unit]
 Description=Exordos Database PG agent
-After=network-online.target
+Wants=network-online.target exordos-bootstrap.service
+After=network-online.target exordos-bootstrap.service
 
 [Service]
 TimeoutStopSec=5

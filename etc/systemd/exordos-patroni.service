@@ -2,12 +2,16 @@
 Description=Patroni High availability PostgreSQL Cluster
 After=syslog.target network.target
 Wants=watchdog.service
+RequiresMountsFor=/persist /var/lib/postgresql/patroni/data /var/lib/postgresql/patroni/raft
+ConditionPathExists=/var/lib/postgresql/patroni/patroni.yml
+AssertPathIsMountPoint=/persist
+AssertPathIsMountPoint=/var/lib/postgresql/patroni/data
+AssertPathIsMountPoint=/var/lib/postgresql/patroni/raft
 
 [Service]
 Type=simple
 User=postgres
 Group=postgres
-ConditionPathExists=/var/lib/postgresql/patroni/patroni.yml
 ExecStart=/var/lib/postgresql/patroni/venv/bin/patroni /var/lib/postgresql/patroni/patroni.yml
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=process
