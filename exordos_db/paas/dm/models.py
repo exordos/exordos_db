@@ -49,6 +49,8 @@ class PGInstanceNode(
     )
     # pgBackRest spec, see exordos_db.common.pgbackrest
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Reported by the agent while the roles are unmanaged, not a target field
+    found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
 
     @classmethod
     def get_resource_kind(cls) -> str:

@@ -148,15 +148,31 @@ class PGInstance(meta.MetaDataPlaneModel):
         default=pc.InstanceStatus.ACTIVE.value,
     )
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Whether the control plane left the roles unmanaged (users and databases
+    # are None in the target), remembered to report them the same way
+    roles_unmanaged = properties.property(ra_types.Boolean(), default=False)
+    # The roles found on the data plane while they are unmanaged. Not a
+    # target field: it changes the full hash only, which is how the control
+    # plane learns about changes on the data plane, while a differing target
+    # field would make the agent apply the target instead of reporting it.
+    found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
 
-    _meta_fields: tp.ClassVar[set[str]] = {"uuid", "name", "nodes_number"}
+    _meta_fields: tp.ClassVar[set[str]] = {
+        "uuid",
+        "name",
+        "nodes_number",
+        "roles_unmanaged",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.c = ClientsSingleton()
 
     def get_meta_model_fields(self) -> set[str] | None:
-        return self._meta_fields
+        return set(self._meta_fields)
+
+    def get_resource_ignore_fields(self) -> list[str]:
+        return [*super().get_resource_ignore_fields(), "roles_unmanaged"]
 
     def _reconcile_target_users(self):
         actual_users = {
@@ -331,6 +347,8 @@ WHERE d.datname not in """
         self.backup = spec if archiving and not stanza_missing else BACKUP_UNSETTLED
 
     def dump_to_dp(self) -> None:
+        self.roles_unmanaged = self.users is None
+
         primary = self.c.pclient.is_primary(get_ttl_hash(seconds=20))
 
         # Stop archiving before the config it uses is removed
@@ -367,6 +385,13 @@ WHERE d.datname not in """
         config = self.c.pclient.config_get()
         self._fill_DCS(config)
         self._fill_backup(config)
+
+        if self.roles_unmanaged:
+            self.found_roles = {"users": self.users, "databases": self.databases}
+            self.users = None
+            self.databases = None
+        else:
+            self.found_roles = None
 
     @on_primary_only
     def delete_from_dp(self) -> None:

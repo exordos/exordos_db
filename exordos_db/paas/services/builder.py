@@ -109,13 +109,16 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         recovery is over and the node is promoted.
         """
         for actual in paas_collection.actuals():
-            if actual is not None and actual.users is not None:
+            if actual is not None and actual.found_roles is not None:
                 break
         else:
             return
 
+        found_users = actual.found_roles["users"]
+        found_databases = actual.found_roles["databases"]
+
         users = {}
-        for name, user in actual.users.items():
+        for name, user in found_users.items():
             if not user.get("pw_hash"):
                 LOG.warning(
                     "User %s of the restored instance %s has no password, "
@@ -132,7 +135,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             )
             users[name].insert()
 
-        for name, database in (actual.databases or {}).items():
+        for name, database in found_databases.items():
             if (owner := users.get(database["owner"])) is None:
                 LOG.warning(
                     "Database %s of the restored instance %s is owned by %s "
@@ -154,7 +157,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         LOG.info(
             "Imported %d users and %d databases of the restored instance %s",
             len(users),
-            len(actual.databases or {}),
+            len(found_databases),
             instance.uuid,
         )
 
