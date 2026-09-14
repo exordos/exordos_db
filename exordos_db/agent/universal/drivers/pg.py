@@ -32,12 +32,17 @@ from restalchemy.dm import types as ra_types
 import yaml
 
 from exordos_db.common import constants
+from exordos_db.common import pgbackrest
 
 LOG = logging.getLogger(__name__)
 
 # NOTE: don't forget to update validation in controlplane
 PG_SYSTEM_USERS_REGEX_TMPL = "'^(pg_|dbaas_|postgres$)'"
 PG_SYSTEM_DATABASES_TMPL = "('postgres', 'template0', 'template1')"
+
+# Reported instead of the backup spec while the data plane hasn't converged
+# to it yet, so the agent keeps applying the spec
+BACKUP_UNSETTLED = {"state": "unsettled"}
 
 
 def get_ttl_hash(seconds=600):
@@ -135,6 +140,7 @@ class PGInstance(meta.MetaDataPlaneModel):
         ra_types.Enum([s.value for s in pc.InstanceStatus]),
         default=pc.InstanceStatus.ACTIVE.value,
     )
+    backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
 
     _meta_fields: tp.ClassVar[set[str]] = {"uuid", "name", "nodes_number"}
 
@@ -280,16 +286,62 @@ WHERE d.datname not in """
             "synchronous_mode": bool(sync_enabled),
             "synchronous_mode_strict": bool(sync_enabled),
             "synchronous_node_count": self.sync_replica_number,
+            "postgresql": {
+                "parameters": {
+                    "archive_command": pgbackrest.archive_command(self.backup),
+                },
+            },
         }
         LOG.info("DCS patch: %s", tconfig)
         self.c.pclient.config_patch(tconfig)
 
-    def _fill_DCS(self):
-        config = self.c.pclient.config_get()
+    def _fill_DCS(self, config: dict[str, tp.Any]) -> None:
         self.sync_replica_number = config["synchronous_node_count"]
 
-    @on_primary_only
+    def _reconcile_backup_stanza(self) -> None:
+        # Idempotent, but talks to the repository, so run it only when the
+        # repository changed or this node hasn't created the stanza yet
+        # (e.g. it has just become the primary)
+        if self.backup is None or pgbackrest.stanza_ready(self.backup):
+            return
+
+        pgbackrest.run(self.backup["stanza"], "stanza-create")
+        pgbackrest.mark_stanza_ready(self.backup)
+        LOG.info("Stanza %s created", self.backup["stanza"])
+
+    def _fill_backup(self, config: dict[str, tp.Any]) -> None:
+        spec = pgbackrest.load_spec()
+        parameters = config.get("postgresql", {}).get("parameters", {})
+
+        archiving = parameters.get("archive_command") == pgbackrest.archive_command(
+            spec
+        )
+        stanza_missing = (
+            spec is not None
+            and self.c.pclient.is_primary(get_ttl_hash(seconds=20))
+            and not pgbackrest.stanza_ready(spec)
+        )
+        self.backup = spec if archiving and not stanza_missing else BACKUP_UNSETTLED
+
     def dump_to_dp(self) -> None:
+        primary = self.c.pclient.is_primary(get_ttl_hash(seconds=20))
+
+        # Stop archiving before the config it uses is removed
+        if primary and self.backup is None:
+            self._reconcile_DCS()
+
+        # Every node keeps the config, any of them may become the primary
+        if pgbackrest.apply_spec(self.backup):
+            LOG.info("Backup config updated")
+        if self.backup is None:
+            pgbackrest.mark_stanza_ready(None)
+
+        if not primary:
+            LOG.debug("Not a primary node, skipping the rest of dump_to_dp.")
+            return
+
+        # The stanza has to exist before archiving is turned on
+        self._reconcile_backup_stanza()
         self._reconcile_DCS()
         self._reconcile_target_users()
         self._reconcile_target_databases()
@@ -297,7 +349,9 @@ WHERE d.datname not in """
     def restore_from_dp(self) -> None:
         self._fill_actual_users()
         self._fill_actual_databases()
-        self._fill_DCS()
+        config = self.c.pclient.config_get()
+        self._fill_DCS(config)
+        self._fill_backup(config)
 
     @on_primary_only
     def delete_from_dp(self) -> None:
@@ -305,7 +359,6 @@ WHERE d.datname not in """
         # TODO: maybe node draining on cluster shrink should be here?
         pass
 
-    @on_primary_only
     def update_on_dp(self) -> None:
         self.dump_to_dp()
 
