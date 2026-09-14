@@ -92,8 +92,9 @@ class PatroniClient:
 
 class ClientsSingleton(singletons.InheritSingleton):
     def __init__(self):
-        self.reinit_pclient()
-        self.reinit_psql()
+        # Connect lazily: a model is built before PostgreSQL may be up
+        self._pclient = None
+        self._psql = None
 
     def reinit_pclient(self):
         self._pclient = PatroniClient()
@@ -106,11 +107,13 @@ class ClientsSingleton(singletons.InheritSingleton):
 
     @property
     def pclient(self):
+        if self._pclient is None:
+            self.reinit_pclient()
         return self._pclient
 
     @property
     def psql(self):
-        if self._psql.broken or self._psql.closed:
+        if self._psql is None or self._psql.broken or self._psql.closed:
             self.reinit_psql()
         return self._psql
 
@@ -130,9 +133,12 @@ class PGInstance(meta.MetaDataPlaneModel):
         ra_types.String(min_length=1, max_length=512),
         required=True,
     )
-    # None leaves them unmanaged, e.g. until a restored cluster's are imported
-    databases = properties.property(ra_types.AllowNone(ra_types.Dict()), default={})
-    users = properties.property(ra_types.AllowNone(ra_types.Dict()), default={})
+    # None leaves them unmanaged, e.g. until a restored cluster's are imported.
+    # The default has to be None too: restalchemy replaces a None value with
+    # the default, so any other default would turn "unmanaged" into "empty"
+    # and drop everything the cluster has.
+    databases = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    users = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
     nodes_number = properties.property(ra_types.Integer(min_value=1, max_value=16))
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
