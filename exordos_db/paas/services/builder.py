@@ -75,6 +75,24 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
     def _get_databases(self, instance):
         return {d.name: {"owner": d.owner.name} for d in instance.get_databases()}
 
+    def _get_backup(self, instance: models.PGInstance) -> dict[str, tp.Any] | None:
+        if instance.backup is None:
+            return None
+
+        options = instance.backup.pgbackrest_repo_options()
+        # WAL lives on the data disk. When the repository is unreachable
+        # pgBackRest drops WAL past this size instead of filling the disk,
+        # which breaks PITR but keeps the database running.
+        options["archive-push-queue-max"] = f"{max(1, instance.disk_size // 4)}GiB"
+        return {
+            "stanza": str(instance.uuid),
+            "options": options,
+            "schedule": {
+                "full_interval_hours": instance.backup.full_interval_hours,
+                "incr_interval_hours": instance.backup.incr_interval_hours,
+            },
+        }
+
     def create_paas_objects(
         self, instance: models.PGInstance
     ) -> tp.Collection[ua_models.TargetResourceKindAwareMixin]:
@@ -101,6 +119,8 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
 
         databases = self._get_databases(instance)
 
+        backup = self._get_backup(instance)
+
         nodeset = instance.get_actual_nodeset()
         nodes_by_idx = list(nodeset.nodes.keys())
 
@@ -115,6 +135,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
                     sync_replica_number=instance.sync_replica_number,
                     users=users,
                     databases=databases,
+                    backup=backup,
                 )
             )
 

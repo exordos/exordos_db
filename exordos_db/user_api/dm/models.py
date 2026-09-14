@@ -27,6 +27,7 @@ from restalchemy.storage.sql import orm
 
 from exordos_db.common import utils as u
 from exordos_db.common.pg_auth import passwd
+from exordos_db.user_api.dm import backups
 
 
 class PGStatus(str, enum.Enum):
@@ -89,6 +90,8 @@ class PGInstance(
     )
     # TODO: support version update
     version = relationships.relationship(PGVersion, required=True, read_only=True)
+    # Continuous WAL archiving and periodic backups, disabled when None
+    backup = properties.property(backups.BACKUP_TYPE, default=None)
 
     def get_users(self, session=None):
         return PGUser.objects.get_all(

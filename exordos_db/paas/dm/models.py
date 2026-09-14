@@ -46,6 +46,8 @@ class PGInstanceNode(
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
     )
+    # pgBackRest spec, see exordos_db.common.pgbackrest
+    backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
 
     @classmethod
     def get_resource_kind(cls) -> str:
@@ -65,6 +67,7 @@ class PGInstanceNode(
                 "nodes_number",
                 "databases",
                 "users",
+                "backup",
             )
         )
 
@@ -93,6 +96,8 @@ class PGInstance(
                 "uuid",
                 "name",
                 "sync_replica_number",
+                "disk_size",
+                "backup",
             )
         )
 
