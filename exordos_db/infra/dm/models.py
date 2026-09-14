@@ -58,6 +58,8 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
                 "project_id",
                 "restore_from",
                 "rollback_revision",
+                # The status depends on it
+                "roles_imported",
             )
         )
 

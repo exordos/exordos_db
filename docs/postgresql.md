@@ -290,11 +290,26 @@ backup after a rollback is always full.
 - A repository that fails (wrong keys, unreachable storage) doesn't stop users,
   databases and settings from being applied.
 
-Users and databases of the restored cluster appear in the API once the
-recovery is over. Imported users have no `password` (`null`) and keep their
-password hashes, so existing clients keep working; setting `password` changes
-it as usual. Users without a password and databases owned by roles DBaaS
-doesn't manage (e.g. `postgres`) aren't imported and get dropped.
+### Users and Databases of a Restored Cluster
+
+Users and databases are part of the data a backup restores. While the cluster
+is restored or rolled back they aren't applied (nothing is created or
+dropped) and the instance is `IN_PROGRESS`. Once the recovery is over the
+agent reports the roles it finds, and DBaaS matches the users and databases of
+the instance to them by name:
+
+- a user or database that existed at the target time and still has a row keeps
+  the row with its uuid, so manifests referring to it keep working; a user
+  keeps its current `password`, which is then set again on the cluster, since
+  clients and secrets already use it; a database gets back its owner;
+- a user or database created after the target time loses its row;
+- a user or database dropped after the target time gets a row back. Such a
+  user has no `password` (`null`) and keeps its password hash, so clients
+  that used it keep working; setting `password` changes it as usual.
+
+Users without a password and databases owned by roles DBaaS doesn't manage
+(e.g. `postgres`) aren't matched and get dropped. User and database names are
+unique within an instance.
 
 ## Validation Rules
 

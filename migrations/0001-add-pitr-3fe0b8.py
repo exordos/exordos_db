@@ -40,6 +40,17 @@ ALTER TABLE postgres_instances
 """,
             # Users imported from a restored cluster have only a hash
             "ALTER TABLE postgres_users ALTER COLUMN password DROP NOT NULL;",
+            # A role is identified by its name inside a cluster. Rows of a
+            # restored cluster are matched to its roles by name, and a
+            # duplicate would make that ambiguous.
+            """\
+CREATE UNIQUE INDEX IF NOT EXISTS postgres_users_instance_name_idx
+    ON postgres_users (instance, name);
+""",
+            """\
+CREATE UNIQUE INDEX IF NOT EXISTS postgres_databases_instance_name_idx
+    ON postgres_databases (instance, name);
+""",
         ]
 
         for expression in expressions:
@@ -47,6 +58,8 @@ ALTER TABLE postgres_instances
 
     def downgrade(self, session):
         expressions = [
+            "DROP INDEX IF EXISTS postgres_databases_instance_name_idx;",
+            "DROP INDEX IF EXISTS postgres_users_instance_name_idx;",
             "UPDATE postgres_users SET password = '' WHERE password IS NULL;",
             "ALTER TABLE postgres_users ALTER COLUMN password SET NOT NULL;",
             """\

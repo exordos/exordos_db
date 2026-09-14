@@ -336,6 +336,9 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
             instance.status = sdk_c.InstanceStatus(nodeset.status).value
         except ValueError:
             instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
+        # A restore or a rollback isn't over until the roles are matched
+        if not instance.roles_managed():
+            instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
 
         return (tgt_nodeset, *new_objects)
 

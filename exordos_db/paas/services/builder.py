@@ -25,6 +25,7 @@ from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.paas.services import builder
 
 from exordos_db.paas.dm import models
+from exordos_db.paas.services import roles
 from exordos_db.user_api.dm import models as user_models
 
 LOG = logging.getLogger(__name__)
@@ -115,16 +116,14 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
 
     @staticmethod
     def _roles_managed(instance: models.PGInstance) -> bool:
-        return instance.roles_imported or (
-            instance.restore_from is None and instance.rollback_revision is None
-        )
+        return instance.roles_managed()
 
     def _import_roles(
         self,
         instance: models.PGInstance,
         paas_collection: builder.PaaSCollection,
     ) -> None:
-        """Take users and databases of a restored cluster under management.
+        """Match users and databases to the roles of a restored cluster.
 
         The agent reports them once PostgreSQL accepts connections, i.e. the
         recovery is over and the node is promoted. After an in-place rollback
@@ -142,51 +141,64 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         else:
             return
 
-        found_users = actual.found_roles["users"]
-        found_databases = actual.found_roles["databases"]
+        users = {u.name: u for u in instance.get_users()}
+        databases = {d.name: d for d in instance.get_databases()}
+        plan = roles.plan_roles(
+            users.keys(),
+            {name: d.owner.name for name, d in databases.items()},
+            actual.found_roles,
+        )
 
-        users = {}
-        for name, user in found_users.items():
-            if not user.get("pw_hash"):
-                LOG.warning(
-                    "User %s of the restored instance %s has no password, "
-                    "it isn't imported and will be dropped",
-                    name,
-                    instance.uuid,
-                )
-                continue
+        for name in plan.unmanageable_users:
+            LOG.warning(
+                "User %s of the restored instance %s has no password, "
+                "it isn't managed and will be dropped",
+                name,
+                instance.uuid,
+            )
+        for name in plan.unmanageable_databases:
+            LOG.warning(
+                "Database %s of the restored instance %s is owned by a role "
+                "that isn't managed, it will be dropped",
+                name,
+                instance.uuid,
+            )
+
+        for name in plan.delete_databases:
+            databases.pop(name).delete()
+        for name, pw_hash in plan.create_users.items():
             users[name] = user_models.PGUser(
                 name=name,
-                password_hash=user["pw_hash"],
+                password_hash=pw_hash,
                 instance=instance,
                 project_id=instance.project_id,
             )
             users[name].insert()
-
-        for name, database in found_databases.items():
-            if (owner := users.get(database["owner"])) is None:
-                LOG.warning(
-                    "Database %s of the restored instance %s is owned by %s "
-                    "that isn't imported, it will be dropped",
-                    name,
-                    instance.uuid,
-                    database["owner"],
-                )
-                continue
+        for name, owner in plan.create_databases.items():
             user_models.PGDatabase(
                 name=name,
-                owner=owner,
+                owner=users[owner],
                 instance=instance,
                 project_id=instance.project_id,
             ).insert()
+        for name, owner in plan.change_owners.items():
+            databases[name].owner = users[owner]
+            databases[name].update()
+        for name in plan.delete_users:
+            users.pop(name).delete()
 
         instance.roles_imported = True
         instance.update(force=True)
+        # Names only: the plan carries password hashes
         LOG.info(
-            "Imported %d users and %d databases of the restored instance %s",
-            len(users),
-            len(found_databases),
+            "Roles of the restored instance %s matched: created users %s and "
+            "databases %s, changed owners of %s, deleted databases %s and users %s",
             instance.uuid,
+            sorted(plan.create_users),
+            sorted(plan.create_databases),
+            sorted(plan.change_owners),
+            plan.delete_databases,
+            plan.delete_users,
         )
 
     def actualize_paas_objects_source_data_plane(

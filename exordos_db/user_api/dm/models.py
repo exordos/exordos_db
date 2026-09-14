@@ -202,14 +202,21 @@ class PGInstance(
             )
         if revision is not None:
             self.rollback_revision = revision
-            # The rolled back cluster has the roles it had at the target time
+            # The rolled back cluster has the roles it had at the target time,
+            # the rows are matched to them once the rollback is applied
             self.roles_imported = False
 
         super().update(session=session, force=force)
 
-        if revision is not None:
-            u.remove_nested_dm(PGDatabase, "instance", self, session=session)
-            u.remove_nested_dm(PGUser, "instance", self, session=session)
+    def roles_managed(self) -> bool:
+        """Whether users and databases are applied to the data plane.
+
+        They aren't while a restored or rolled back cluster has roles the
+        control plane hasn't matched its rows to yet.
+        """
+        return self.roles_imported or (
+            self.restore_from is None and self.rollback_revision is None
+        )
 
     def delete(self, session=None, **kwargs):
         u.remove_nested_dm(PGDatabase, "instance", self, session=session)
