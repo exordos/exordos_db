@@ -44,6 +44,11 @@ LOG = logging.getLogger(__name__)
 CONF_DIR = "/etc/pgbackrest"
 CONF_FILE = f"{CONF_DIR}/pgbackrest.conf"
 SPEC_FILE = f"{CONF_DIR}/exordos_backup.json"
+# Delivered by the control plane before the cluster is bootstrapped
+RESTORE_SPEC_FILE = f"{CONF_DIR}/exordos_restore.json"
+# The restore config is referenced by restore_command until the recovery
+# ends, so it lives next to the data until the agent sees a primary
+RESTORE_CONF_FILE = f"{cc.PATRONI_DIR}/pgbackrest-restore.conf"
 # Fingerprint of the repository the stanza was created in on this node
 STANZA_MARKER_FILE = f"{cc.WORK_DIR}/backup_stanza.sha256"
 
@@ -104,8 +109,8 @@ def repo_fingerprint(spec: dict[str, tp.Any]) -> str:
     return hashlib.sha256(data.encode()).hexdigest()
 
 
-def load_spec() -> dict[str, tp.Any] | None:
-    return files.read_json(SPEC_FILE)
+def load_spec(path: str = SPEC_FILE) -> dict[str, tp.Any] | None:
+    return files.read_json(path)
 
 
 def apply_spec(spec: dict[str, tp.Any] | None) -> bool:
@@ -157,6 +162,29 @@ def run(
             f"{result.stderr.strip() or result.stdout.strip()}"
         )
     return result.stdout
+
+
+def write_restore_config(spec: dict[str, tp.Any]) -> None:
+    # Written by the restore command running as postgres
+    fd = os.open(RESTORE_CONF_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(render_config(spec))
+
+
+def remove_restore_config() -> bool:
+    return files.remove(RESTORE_CONF_FILE)
+
+
+def restore_args(spec: dict[str, tp.Any]) -> list[str]:
+    args = [f"--config={RESTORE_CONF_FILE}"]
+    if spec["target_time"] is not None:
+        args += [
+            "--type=time",
+            f"--target={spec['target_time']}",
+            "--target-action=promote",
+        ]
+    # Without a target the archive is replayed to its end
+    return [*args, "restore"]
 
 
 def choose_backup_type(

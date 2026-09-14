@@ -33,8 +33,12 @@ class MigrationStep(migrations.AbstarctMigrationStep):
         expressions = [
             """\
 ALTER TABLE postgres_instances
-    ADD COLUMN backup JSONB;
+    ADD COLUMN backup JSONB,
+    ADD COLUMN restore_from JSONB,
+    ADD COLUMN roles_imported BOOLEAN NOT NULL DEFAULT FALSE;
 """,
+            # Users imported from a restored cluster have only a hash
+            "ALTER TABLE postgres_users ALTER COLUMN password DROP NOT NULL;",
         ]
 
         for expression in expressions:
@@ -42,8 +46,12 @@ ALTER TABLE postgres_instances
 
     def downgrade(self, session):
         expressions = [
+            "UPDATE postgres_users SET password = '' WHERE password IS NULL;",
+            "ALTER TABLE postgres_users ALTER COLUMN password SET NOT NULL;",
             """\
 ALTER TABLE postgres_instances
+    DROP COLUMN IF EXISTS roles_imported,
+    DROP COLUMN IF EXISTS restore_from,
     DROP COLUMN IF EXISTS backup;
 """,
         ]
