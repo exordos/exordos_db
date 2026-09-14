@@ -42,6 +42,25 @@ def test_unmanaged_roles_stay_unmanaged():
     assert instance.databases is None
 
 
+def test_found_roles_change_the_full_hash_only():
+    # The agent reports a resource read from the data plane only while its
+    # target hash matches; the control plane learns about the data plane
+    # from the full hash. The found roles have to travel that way.
+    resource = ua_models.Resource.from_value(UNMANAGED_ROLES, "pg_instance_node")
+    empty = pg.PGInstance.from_ua_resource(resource)
+    found = pg.PGInstance.from_ua_resource(resource)
+    found.found_roles = {"users": {"app": {"pw_hash": "x"}}, "databases": {}}
+    found.roles_unmanaged = True
+
+    empty_resource = empty.to_ua_resource("pg_instance_node")
+    found_resource = found.to_ua_resource("pg_instance_node")
+
+    assert found_resource.hash == empty_resource.hash
+    assert found_resource.full_hash != empty_resource.full_hash
+    assert "roles_unmanaged" not in found_resource.value
+    assert "roles_unmanaged" in found.get_meta_fields()
+
+
 def test_managed_roles():
     value = {
         **UNMANAGED_ROLES,

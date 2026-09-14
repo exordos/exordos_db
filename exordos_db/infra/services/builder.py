@@ -149,8 +149,13 @@ RESTORE_BOOTSTRAP_METHOD = """\
 """
 
 
+def bootstraps_from_backup(instance: models.PGInstance) -> bool:
+    # A source set for an in-place rollback isn't a bootstrap source
+    return instance.restore_from is not None and instance.rollback_revision is None
+
+
 def bootstrap_method(instance: models.PGInstance) -> str:
-    return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
+    return RESTORE_BOOTSTRAP_METHOD if bootstraps_from_backup(instance) else ""
 
 
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
@@ -290,7 +295,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
             )
             new_objects.append(config)
 
-            if instance.restore_from is not None:
+            if bootstraps_from_backup(instance):
                 new_objects.append(
                     instance._create_restore_config(
                         uuid.UUID(node_uuid), self._project_id

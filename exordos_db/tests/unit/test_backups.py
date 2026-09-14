@@ -15,6 +15,7 @@
 #    under the License.
 
 import datetime
+import json
 import types
 import uuid
 
@@ -104,12 +105,36 @@ class TestS3Backup:
             # Would inject an option into pgbackrest.conf
             ("secret_key", "secret\nrepo1-path=/other"),
             ("path", "relative"),
+            ("path", "/exordos_db/../other"),
+            ("path", "/exordos_db/.."),
+            # Reached from the nodes, with errors reported through the API
+            ("endpoint", "http://127.0.0.1:9000"),
+            ("endpoint", "http://localhost:9000"),
+            ("endpoint", "http://169.254.169.254"),
+            ("endpoint", "http://[::1]:9000"),
+            ("endpoint", "http://0.0.0.0:9000"),
             ("uri_style", "virtual"),
         ],
     )
     def test_invalid(self, field, value):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
             _s3(**{field: value})
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("path", "/exordos_db/a..b"),
+            # The storage is often in the same private network
+            ("endpoint", "http://10.20.0.26:9000"),
+            ("endpoint", "https://s3.example.com"),
+        ],
+    )
+    def test_valid(self, field, value):
+        assert _s3(**{field: value}).storage_repo_options()
+
+    def test_restore_source_endpoint_is_checked(self):
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            _restore_source(endpoint="http://169.254.169.254")
 
     @pytest.mark.parametrize("field", ["endpoint", "bucket", "access_key"])
     def test_required(self, field):
@@ -174,8 +199,11 @@ class TestConfig:
         queue = _spec(**{"archive-push-queue-max": "4GiB"})
         schedule = _spec()
         schedule["schedule"]["incr_interval_hours"] = 1
+        # Changing it mustn't recreate the stanza against the repository
+        retention = _spec(**{"repo1-retention-full": "7"})
         assert pgbackrest.repo_fingerprint(queue) == base
         assert pgbackrest.repo_fingerprint(schedule) == base
+        assert pgbackrest.repo_fingerprint(retention) == base
 
         assert pgbackrest.repo_fingerprint(_spec(**{"repo1-path": "/x"})) != base
         stanza = _spec()
@@ -239,28 +267,187 @@ class TestS3RestoreSource:
             backups.RESTORE_SOURCE_TYPE.from_simple_type(S3_VIEW)
 
 
+def _repo_backup(label, timeline, lsn, stop, error=False, stop_lsn=None):
+    return {
+        "label": label,
+        "error": error,
+        "archive": {"start": f"{timeline:08X}0000000000000004"},
+        "lsn": {"start": lsn, "stop": stop_lsn or lsn},
+        "timestamp": {"start": stop - 2, "stop": stop},
+        "database": {"id": 1, "repo-key": 1},
+    }
+
+
+# Taken from a cluster rolled back twice: timeline 2 forked from timeline 1
+# after the first backup, a full backup was taken on timeline 2, and the
+# second rollback forked timeline 3 from timeline 2 before that backup
+HISTORY_3 = (
+    "1\t0/501ACA0\tbefore 2026-09-14 15:11:18.586686+00\n\n\n"
+    "2\t0/5017830\tbefore 2026-09-14 15:11:13.744683+00\n"
+)
+BEFORE_ROLLBACKS = _repo_backup("20260914-151105F", 1, "0/4000028", 1789398667)
+ABANDONED = _repo_backup("20260914-151438F", 2, "0/7000028", 1789398881)
+TARGET_AFTER_BOTH = "2026-09-14 15:20:01.330951+00"  # 1789399201.33
+
+
+class TestBackupSet:
+    @staticmethod
+    def _timelines(latest=3, history=HISTORY_3):
+        return lambda backup: pgbackrest.Timelines(
+            latest, pgbackrest.parse_history(history)
+        )
+
+    def test_backup_on_an_abandoned_branch_is_skipped(self):
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS, ABANDONED], TARGET_AFTER_BOTH, self._timelines()
+        )
+        assert chosen == BEFORE_ROLLBACKS["label"]
+
+    def test_newest_backup_on_the_latest_timeline(self):
+        on_latest = _repo_backup("20260914-152000F", 3, "0/9000028", 1789399100)
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS, ABANDONED, on_latest],
+            TARGET_AFTER_BOTH,
+            self._timelines(),
+        )
+        assert chosen == on_latest["label"]
+
+    def test_backup_has_to_finish_before_the_target(self):
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS],
+            "2026-09-14 15:11:06.000000+00",  # before its stop
+            self._timelines(),
+        )
+        assert chosen is None
+
+    def test_failed_backup_is_skipped(self):
+        failed = _repo_backup("20260914-152000F", 3, "0/9000028", 1789399100, True)
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS, failed], None, self._timelines()
+        )
+        assert chosen == BEFORE_ROLLBACKS["label"]
+
+    def test_end_of_the_archive_without_rollbacks(self):
+        newer = _repo_backup("20260914-152000I", 1, "0/9000028", 1789399100)
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS, newer], None, self._timelines(1, "")
+        )
+        assert chosen == newer["label"]
+
+    def test_no_backup_in_the_latest_history(self):
+        chosen = pgbackrest.choose_backup_set(
+            [ABANDONED], TARGET_AFTER_BOTH, self._timelines()
+        )
+        assert chosen is None
+
+    def test_backup_running_over_the_fork_is_skipped(self):
+        # Started on timeline 2 before timeline 3 forked from it, ended after:
+        # the end of the backup is on the abandoned branch
+        over_the_fork = _repo_backup(
+            "20260914-151200F", 2, "0/5000028", 1789398800, stop_lsn="0/5020000"
+        )
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS, over_the_fork], TARGET_AFTER_BOTH, self._timelines()
+        )
+        assert chosen == BEFORE_ROLLBACKS["label"]
+
+    def test_backup_ending_within_the_target_second_is_skipped(self):
+        # The stop time has whole seconds only, the backup may have ended
+        # after the target
+        on_latest = _repo_backup("20260914-152000F", 3, "0/9000028", 1789399201)
+        chosen = pgbackrest.choose_backup_set(
+            [BEFORE_ROLLBACKS, on_latest], TARGET_AFTER_BOTH, self._timelines()
+        )
+        assert chosen == BEFORE_ROLLBACKS["label"]
+
+
+class TestRestoreBackupSet:
+    STANZA = "84022dd1-a9db-41de-9490-9ab07976d5a2"
+    ARCHIVE = f"archive/{STANZA}/18-1"
+
+    @pytest.fixture
+    def calls(self, monkeypatch):
+        outputs = {
+            "info": json.dumps(
+                [
+                    {
+                        "archive": [{"database": {"id": 1}, "id": "18-1"}],
+                        "backup": [BEFORE_ROLLBACKS, ABANDONED],
+                    }
+                ]
+            ),
+            "repo-ls": json.dumps(
+                {
+                    "00000002.history": {"type": "file"},
+                    "00000003.history": {"type": "file"},
+                }
+            ),
+            "repo-get": HISTORY_3,
+        }
+        calls = []
+
+        def run(stanza, *args, timeout=600):
+            calls.append((stanza, args))
+            command = next(a for a in args if not a.startswith("--"))
+            return outputs[command]
+
+        monkeypatch.setattr(pgbackrest, "run", run)
+        return calls
+
+    def test_history_of_the_latest_timeline_is_read(self, calls):
+        chosen = pgbackrest.restore_backup_set(self.STANZA, TARGET_AFTER_BOTH)
+
+        assert chosen == BEFORE_ROLLBACKS["label"]
+        config = "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf"
+        assert calls == [
+            (self.STANZA, (config, "--output=json", "info")),
+            (
+                self.STANZA,
+                (
+                    config,
+                    "--output=json",
+                    "--filter=\\.history$",
+                    "repo-ls",
+                    self.ARCHIVE,
+                ),
+            ),
+            (self.STANZA, (config, "repo-get", f"{self.ARCHIVE}/00000003.history")),
+        ]
+
+    def test_no_backup_fails(self, calls):
+        with pytest.raises(pgbackrest.PgBackRestError):
+            pgbackrest.restore_backup_set(self.STANZA, "2026-09-14 15:11:00.000000+00")
+
+
 class TestRestore:
     def test_args_latest(self):
-        assert pgbackrest.restore_args({"target_time": None}) == [
+        assert pgbackrest.restore_args({"target_time": None}, "F1") == [
             "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
+            "--set=F1",
             "restore",
         ]
 
     def test_args_target_time(self):
         spec = {"target_time": "2026-09-14 10:30:15.000250+00"}
-        assert pgbackrest.restore_args(spec) == [
+        assert pgbackrest.restore_args(spec, "F1") == [
             "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
+            "--set=F1",
             "--type=time",
             "--target=2026-09-14 10:30:15.000250+00",
             "--target-action=promote",
             "restore",
         ]
 
-    @pytest.mark.parametrize("restore", [False, True])
-    def test_patroni_config(self, restore):
+    @pytest.mark.parametrize(
+        "restore, rolled_back", [(False, False), (True, False), (True, True)]
+    )
+    def test_patroni_config(self, restore, rolled_back):
         instance = types.SimpleNamespace(
-            restore_from=_restore_source() if restore else None
+            restore_from=_restore_source() if restore else None,
+            rollback_revision=1 if rolled_back else None,
         )
+        # A source of an in-place rollback isn't a bootstrap source
+        restore = restore and not rolled_back
 
         config = yaml.safe_load(
             infra_builder.PATRONI_CONF_TEMPLATE.format(
@@ -319,6 +506,27 @@ class TestChooseBackupType:
             _backup("incr", self.now - HOUR, error=True),
         ]
         assert self._choose(backups) == "incr"
+
+    def test_full_after_rollback(self):
+        backups = [
+            _backup("full", self.now - 30 * HOUR),
+            _backup("incr", self.now - 2 * HOUR),
+        ]
+        rolled_back = self.now - HOUR
+        assert (
+            pgbackrest.choose_backup_type(
+                backups, _spec()["schedule"], self.now, full_after=rolled_back
+            )
+            == "full"
+        )
+
+        backups.append(_backup("full", self.now - 10))
+        assert (
+            pgbackrest.choose_backup_type(
+                backups, _spec()["schedule"], self.now, full_after=rolled_back
+            )
+            is None
+        )
 
     def test_nothing_due(self):
         backups = [

@@ -49,6 +49,10 @@ class PGInstanceNode(
     )
     # pgBackRest spec, see exordos_db.common.pgbackrest
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # In-place rollback spec, see exordos_db.common.rollback
+    rollback = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Reported by the agent while the roles are unmanaged, not a target field
+    found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
 
     @classmethod
     def get_resource_kind(cls) -> str:
@@ -72,7 +76,7 @@ class PGInstanceNode(
         # of an instance created before them, would never match the target
         # hash otherwise. The agent takes the target fields from what it's
         # sent, so a missing one is the same None to a newer agent.
-        for name in ("backup",):
+        for name in ("backup", "rollback"):
             if getattr(self, name) is not None:
                 fields.add(name)
         return frozenset(fields)
@@ -105,6 +109,7 @@ class PGInstance(
                 "disk_size",
                 "backup",
                 "roles_imported",
+                "rollback_revision",
             )
         )
 

@@ -29,10 +29,13 @@ both the agent and the backup timer read the applied state from one place.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import logging
+import math
 import os
+import shutil
 import subprocess
 import typing as tp
 
@@ -104,7 +107,12 @@ def render_config(spec: dict[str, tp.Any]) -> str:
 
 def repo_fingerprint(spec: dict[str, tp.Any]) -> str:
     """Identify the repository and stanza, ignoring unrelated options."""
-    repo = {k: v for k, v in spec["options"].items() if k.startswith("repo")}
+    # Retention is applied by backups, not by creating the stanza
+    repo = {
+        k: v
+        for k, v in spec["options"].items()
+        if k.startswith("repo") and k != "repo1-retention-full"
+    }
     data = json.dumps({"stanza": spec["stanza"], "repo": repo}, sort_keys=True)
     return hashlib.sha256(data.encode()).hexdigest()
 
@@ -165,18 +173,26 @@ def run(
 
 
 def write_restore_config(spec: dict[str, tp.Any]) -> None:
-    # Written by the restore command running as postgres
+    # Read by pgbackrest running as postgres, written either by the restore
+    # command running as postgres or by the rollback job running as root
     fd = os.open(RESTORE_CONF_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(render_config(spec))
+    if os.geteuid() == 0:
+        shutil.chown(RESTORE_CONF_FILE, user="postgres", group="postgres")
 
 
 def remove_restore_config() -> bool:
     return files.remove(RESTORE_CONF_FILE)
 
 
-def restore_args(spec: dict[str, tp.Any]) -> list[str]:
-    args = [f"--config={RESTORE_CONF_FILE}"]
+def restore_args(spec: dict[str, tp.Any], backup_set: str) -> list[str]:
+    """Return the restore arguments.
+
+    delta=y comes from the rendered config: only files that differ are
+    fetched from the repository.
+    """
+    args = [f"--config={RESTORE_CONF_FILE}", f"--set={backup_set}"]
     if spec["target_time"] is not None:
         args += [
             "--type=time",
@@ -187,19 +203,133 @@ def restore_args(spec: dict[str, tp.Any]) -> list[str]:
     return [*args, "restore"]
 
 
+def target_timestamp(target_time: str) -> float:
+    return (
+        datetime.datetime.strptime(target_time, "%Y-%m-%d %H:%M:%S.%f+00")
+        .replace(tzinfo=datetime.timezone.utc)
+        .timestamp()
+    )
+
+
+def _lsn(text: str) -> int:
+    high, low = text.split("/")
+    return int(high, 16) << 32 | int(low, 16)
+
+
+def parse_history(content: str) -> dict[int, int]:
+    """Map the ancestors of a timeline to the LSNs it forked from them at."""
+    forks = {}
+    for line in content.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0].isdigit():
+            forks[int(fields[0])] = _lsn(fields[1])
+    return forks
+
+
+class Timelines(tp.NamedTuple):
+    # The timeline a recovery follows by default
+    latest: int
+    # The ancestors of the latest timeline and where it forked from each
+    forks: dict[int, int]
+
+
+def choose_backup_set(
+    backups: tp.Iterable[dict[str, tp.Any]],
+    target_time: str | None,
+    timelines: tp.Callable[[dict[str, tp.Any]], Timelines],
+) -> str | None:
+    """Choose the backup to recover to the target from.
+
+    `backups` is the `backup` list of `pgbackrest info --output=json`,
+    `timelines` gives the timelines of the archive a backup belongs to.
+
+    pgBackRest picks the newest backup finished before the target and fails
+    when it is off the latest timeline's history: after a rollback to an
+    earlier point, a backup taken before the rollback but after the point it
+    forked at is on an abandoned branch.
+
+    A backup on an ancestor has to end before the fork, not only start: the
+    record of its end is in the WAL of the abandoned branch otherwise, and
+    the recovery never becomes consistent.
+    """
+    # The stop time of a backup is in whole seconds: compared as pgBackRest
+    # does, a backup ending within the target's second doesn't count
+    target = None if target_time is None else math.floor(target_timestamp(target_time))
+    for backup in sorted(backups, key=lambda b: b["timestamp"]["stop"], reverse=True):
+        if backup.get("error"):
+            continue
+        if target is not None and backup["timestamp"]["stop"] >= target:
+            continue
+        timeline = int(backup["archive"]["start"][:8], 16)
+        latest, forks = timelines(backup)
+        if timeline >= latest or (
+            timeline in forks and _lsn(backup["lsn"]["stop"]) <= forks[timeline]
+        ):
+            return backup["label"]
+    return None
+
+
+def restore_backup_set(stanza: str, target_time: str | None) -> str:
+    """Choose the backup to restore with the restore config."""
+    config = f"--config={RESTORE_CONF_FILE}"
+    info = json.loads(run(stanza, config, "--output=json", "info"))
+    stanza_info = info[0] if info else {}
+    archive_ids = {a["database"]["id"]: a["id"] for a in stanza_info.get("archive", [])}
+    loaded: dict[str, Timelines] = {}
+
+    def timelines(backup: dict[str, tp.Any]) -> Timelines:
+        archive_id = archive_ids[backup["database"]["id"]]
+        if archive_id not in loaded:
+            path = f"archive/{stanza}/{archive_id}"
+            listed = json.loads(
+                run(
+                    stanza,
+                    config,
+                    "--output=json",
+                    "--filter=\\.history$",
+                    "repo-ls",
+                    path,
+                )
+            )
+            histories = sorted(int(name[:8], 16) for name in listed)
+            if not histories:
+                loaded[archive_id] = Timelines(1, {})
+            else:
+                latest = histories[-1]
+                content = run(
+                    stanza, config, "repo-get", f"{path}/{latest:08X}.history"
+                )
+                loaded[archive_id] = Timelines(latest, parse_history(content))
+        return loaded[archive_id]
+
+    backup_set = choose_backup_set(
+        stanza_info.get("backup", []), target_time, timelines
+    )
+    if backup_set is None:
+        raise PgBackRestError(
+            f"No backup to recover to {target_time or 'the end of the archive'} from"
+        )
+    return backup_set
+
+
 def choose_backup_type(
     backups: tp.Iterable[dict[str, tp.Any]],
     schedule: dict[str, int],
     now: float,
+    full_after: float | None = None,
 ) -> str | None:
     """Decide which backup is due, if any.
 
     `backups` is the `backup` list of `pgbackrest info --output=json`.
+    `full_after` forces a full backup until one finishes after that moment,
+    e.g. after a rollback, when older backups belong to another timeline.
     """
     done = [b for b in backups if not b.get("error")]
 
     fulls = [b["timestamp"]["stop"] for b in done if b["type"] == "full"]
     if not fulls or now - max(fulls) >= schedule["full_interval_hours"] * 3600:
+        return "full"
+    if full_after is not None and max(fulls) < full_after:
         return "full"
 
     last = max(b["timestamp"]["stop"] for b in done)

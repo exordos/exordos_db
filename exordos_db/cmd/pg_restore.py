@@ -49,7 +49,10 @@ def main() -> int:
         spec["stanza"],
         spec["target_time"] or "the end of the archive",
     )
-    pgbackrest.run(spec["stanza"], *pgbackrest.restore_args(spec), timeout=None)
+    backup_set = pgbackrest.restore_backup_set(spec["stanza"], spec["target_time"])
+    pgbackrest.run(
+        spec["stanza"], *pgbackrest.restore_args(spec, backup_set), timeout=None
+    )
     LOG.info("Restore of %s is done, recovery is up to PostgreSQL", spec["stanza"])
     return 0
 

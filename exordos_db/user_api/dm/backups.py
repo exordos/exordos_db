@@ -15,8 +15,10 @@
 #    under the License.
 
 import datetime
+import ipaddress
 import re
 import typing as tp
+import urllib.parse
 
 from restalchemy.dm import models
 from restalchemy.dm import properties
@@ -40,7 +42,31 @@ class BucketNameType(types.BaseCompiledRegExpTypeFromAttr):
 
 
 class RepoPathType(types.BaseCompiledRegExpTypeFromAttr):
-    pattern = re.compile(r"^/[A-Za-z0-9_./-]{0,1023}$")
+    # No ".." segments
+    pattern = re.compile(r"^(?!.*/\.\.(/|$))/[A-Za-z0-9_./-]{0,1023}$")
+
+
+def check_endpoint_host(endpoint: str) -> None:
+    """Reject endpoints on the nodes themselves or the metadata service.
+
+    The repository is reached from the nodes of the instance, and errors of
+    reaching it are reported through the API. Private addresses are allowed:
+    the storage is often in the same network.
+    """
+    host = urllib.parse.urlsplit(endpoint).hostname or ""
+    if host == "localhost" or host.endswith(".localhost"):
+        raise ValueError(f"endpoint host {host} is not allowed")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if (
+        address.is_loopback
+        or address.is_link_local
+        or address.is_unspecified
+        or address.is_multicast
+    ):
+        raise ValueError(f"endpoint address {host} is not allowed")
 
 
 class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
@@ -60,6 +86,9 @@ class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
         types.AllowNone(OptionValueType()),
         default=None,
     )
+
+    def validate(self) -> None:
+        check_endpoint_host(self.endpoint)
 
     def storage_repo_options(self) -> dict[str, str]:
         """Return pgBackRest `repo1-*` options to reach the repository."""
@@ -137,6 +166,13 @@ class S3RestoreSource(S3Storage):
     stanza = properties.property(types.UUID(), required=True)
     # What the recovery stops at
     target = properties.property(RESTORE_TARGET_TYPE, default=RestoreLatest)
+    # Setting a source with a higher revision on an existing instance rolls
+    # its data back in place. Nothing else about the source can change
+    # without it, so a rollback is never the side effect of an edit.
+    revision = properties.property(
+        types.Integer(min_value=0, max_value=2**31 - 1),
+        default=0,
+    )
 
     def restore_spec(self) -> dict[str, tp.Any]:
         target_time = None
@@ -149,6 +185,11 @@ class S3RestoreSource(S3Storage):
             "options": self.storage_repo_options(),
             "target_time": target_time,
         }
+
+    def identity(self) -> tuple[str, str | None, int]:
+        """What makes two sources restore the same data."""
+        spec = self.restore_spec()
+        return (spec["stanza"], spec["target_time"], self.revision)
 
 
 BACKUP_TYPE = types.AllowNone(

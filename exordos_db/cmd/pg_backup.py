@@ -22,6 +22,7 @@ import time
 
 from exordos_db.agent.universal.drivers import pg
 from exordos_db.common import pgbackrest
+from exordos_db.common import rollback
 
 LOG = logging.getLogger(__name__)
 
@@ -36,8 +37,13 @@ def main() -> int:
         LOG.info("Backups are disabled")
         return 0
 
-    if not pg.PatroniClient().is_primary():
+    patroni = pg.PatroniClient()
+    if not patroni.is_primary():
         LOG.info("Not a primary node, nothing to do")
+        return 0
+    # A paused cluster may be rolled back: its data is about to be replaced
+    if patroni.config_get().get("pause"):
+        LOG.info("The cluster is paused, no backup is taken")
         return 0
 
     # The agent creates the stanza and turns archiving on first
@@ -49,7 +55,9 @@ def main() -> int:
     info = json.loads(pgbackrest.run(stanza, "--output=json", "info"))
     backups = info[0].get("backup", []) if info else []
 
-    backup_type = pgbackrest.choose_backup_type(backups, spec["schedule"], time.time())
+    backup_type = pgbackrest.choose_backup_type(
+        backups, spec["schedule"], time.time(), full_after=rollback.applied_at()
+    )
     if backup_type is None:
         LOG.info("No backup is due")
         return 0

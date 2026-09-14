@@ -33,6 +33,13 @@ CONFIG_KIND = sdk_models.Config.get_resource_kind()
 AGENT_UUID5_NAME = "dbaas"
 
 
+def rollback_id(instance: models.PGInstance) -> str | None:
+    """The id the nodes know the instance's in-place rollback by."""
+    if instance.rollback_revision is None:
+        return None
+    return str(instance.rollback_revision)
+
+
 class PaaSBuilder(builder.PaaSBuilder):
     @classmethod
     def agent_uuid_by_node(cls, node_uuid: sys_uuid.UUID) -> sys_uuid.UUID:
@@ -94,9 +101,23 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             },
         }
 
+    def _get_rollback(self, instance: models.PGInstance) -> dict[str, tp.Any] | None:
+        """Render the in-place rollback the nodes converge to, if any.
+
+        Rendered from the source as it is now, like the backup is, so new
+        credentials of the source reach a rollback in progress. Once the
+        source is cleared the rollback is done with and none is asked for any
+        more.
+        """
+        if instance.rollback_revision is None or instance.restore_from is None:
+            return None
+        return {"id": rollback_id(instance), **instance.restore_from.restore_spec()}
+
     @staticmethod
     def _roles_managed(instance: models.PGInstance) -> bool:
-        return instance.restore_from is None or instance.roles_imported
+        return instance.roles_imported or (
+            instance.restore_from is None and instance.rollback_revision is None
+        )
 
     def _import_roles(
         self,
@@ -106,16 +127,26 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         """Take users and databases of a restored cluster under management.
 
         The agent reports them once PostgreSQL accepts connections, i.e. the
-        recovery is over and the node is promoted.
+        recovery is over and the node is promoted. After an in-place rollback
+        only a node that has applied it reports the rolled back state, which
+        it does by reporting the rollback back by its id.
         """
+        requested = rollback_id(instance)
         for actual in paas_collection.actuals():
-            if actual is not None and actual.users is not None:
+            if (
+                actual is not None
+                and actual.found_roles is not None
+                and (actual.rollback or {}).get("id") == requested
+            ):
                 break
         else:
             return
 
+        found_users = actual.found_roles["users"]
+        found_databases = actual.found_roles["databases"]
+
         users = {}
-        for name, user in actual.users.items():
+        for name, user in found_users.items():
             if not user.get("pw_hash"):
                 LOG.warning(
                     "User %s of the restored instance %s has no password, "
@@ -132,7 +163,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             )
             users[name].insert()
 
-        for name, database in (actual.databases or {}).items():
+        for name, database in found_databases.items():
             if (owner := users.get(database["owner"])) is None:
                 LOG.warning(
                     "Database %s of the restored instance %s is owned by %s "
@@ -154,7 +185,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         LOG.info(
             "Imported %d users and %d databases of the restored instance %s",
             len(users),
-            len(actual.databases or {}),
+            len(found_databases),
             instance.uuid,
         )
 
@@ -197,6 +228,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             databases = self._get_databases(instance)
 
         backup = self._get_backup(instance)
+        rollback_spec = self._get_rollback(instance)
 
         nodeset = instance.get_actual_nodeset()
         nodes_by_idx = list(nodeset.nodes.keys())
@@ -213,6 +245,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
                     users=users,
                     databases=databases,
                     backup=backup,
+                    rollback=rollback_spec,
                 )
             )
 

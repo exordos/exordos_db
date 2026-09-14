@@ -16,8 +16,10 @@
 
 import enum
 import re
+import uuid
 
 from gcl_sdk.agents.universal.dm import models as ua_models
+from restalchemy.common import exceptions as ra_exc
 from restalchemy.dm import filters as dm_filters
 from restalchemy.dm import models
 from restalchemy.dm import properties
@@ -28,6 +30,63 @@ from restalchemy.storage.sql import orm
 from exordos_db.common import utils as u
 from exordos_db.common.pg_auth import passwd
 from exordos_db.user_api.dm import backups
+
+
+class RestoreSourceError(ra_exc.ValidationErrorException):
+    message = "restore_from: %(reason)s"
+
+
+class InstanceUpdateError(ra_exc.ValidationErrorException):
+    message = "%(reason)s"
+
+
+def check_nodes_change(old: int, new: int, roles_managed: bool) -> None:
+    # A removed node may be the one leading an unfinished rollback
+    if new < old and not roles_managed:
+        raise InstanceUpdateError(
+            reason="nodes_number can't be decreased while the instance is "
+            "restored or rolled back"
+        )
+
+
+def rollback_for_update(
+    instance_uuid: uuid.UUID,
+    old: backups.S3RestoreSource | None,
+    new: backups.S3RestoreSource | None,
+    rollback_revision: int | None,
+) -> int | None:
+    """Return the revision an update of `restore_from` rolls the data back with.
+
+    A different source rolls the data back in place only with a revision
+    higher than any seen so far, so an edit of a manifest can't roll a
+    database back by accident.
+    """
+    if new is None:
+        # The data stays as it is
+        return None
+    if old is not None and new.identity() == old.identity():
+        # E.g. rotated credentials of the same source
+        return None
+    if isinstance(new.target, backups.RestoreLatest):
+        # The end of the archive is the state the instance already has
+        raise RestoreSourceError(
+            reason="target has to be a time to roll the data back in place"
+        )
+
+    revisions = [-1 if old is None else old.revision]
+    if rollback_revision is not None:
+        revisions.append(rollback_revision)
+    if new.revision <= max(revisions):
+        raise RestoreSourceError(
+            reason=f"revision must be greater than {max(revisions)} "
+            "to roll the data back in place"
+        )
+    if new.stanza != instance_uuid:
+        raise RestoreSourceError(
+            reason="an instance can be rolled back in place only to its own "
+            "backups, create a new instance to restore another one's"
+        )
+    return new.revision
 
 
 class PGStatus(str, enum.Enum):
@@ -92,14 +151,23 @@ class PGInstance(
     version = relationships.relationship(PGVersion, required=True, read_only=True)
     # Continuous WAL archiving and periodic backups, disabled when None
     backup = properties.property(backups.BACKUP_TYPE, default=None)
-    # Bootstrap the cluster from a backup instead of an empty database
-    restore_from = properties.property(
-        backups.RESTORE_SOURCE_TYPE, default=None, read_only=True
-    )
+    # The backup the data comes from: the cluster is bootstrapped from it on
+    # creation, and rolled back to it in place when a source with a higher
+    # revision is set later
+    restore_from = properties.property(backups.RESTORE_SOURCE_TYPE, default=None)
     # Users and databases of a restored cluster exist on the data plane
     # before the control plane knows them. They aren't managed (so aren't
     # dropped) until they are imported.
     roles_imported = properties.property(types.Boolean(), default=False)
+    # The revision of the in-place rollback the nodes converge to, None when
+    # `restore_from` is a bootstrap source instead. It is also the highest
+    # revision used so far, which the next rollback has to exceed. The spec
+    # the nodes get is rendered from `restore_from`, see
+    # exordos_db.common.rollback.
+    rollback_revision = properties.property(
+        types.AllowNone(types.Integer(min_value=0, max_value=2**31 - 1)),
+        default=None,
+    )
 
     def get_users(self, session=None):
         return PGUser.objects.get_all(
@@ -118,7 +186,30 @@ class PGInstance(
 
     def update(self, session=None, force=False):
         self._validate_update(session=session)
+
+        nodes = self.properties["nodes_number"]
+        if nodes.is_dirty():
+            check_nodes_change(nodes.old_value, self.nodes_number, self.roles_managed())
+
+        restore_from = self.properties["restore_from"]
+        revision = None
+        if restore_from.is_dirty():
+            revision = rollback_for_update(
+                self.uuid,
+                restore_from.old_value,
+                self.restore_from,
+                self.rollback_revision,
+            )
+        if revision is not None:
+            self.rollback_revision = revision
+            # The rolled back cluster has the roles it had at the target time
+            self.roles_imported = False
+
         super().update(session=session, force=force)
+
+        if revision is not None:
+            u.remove_nested_dm(PGDatabase, "instance", self, session=session)
+            u.remove_nested_dm(PGUser, "instance", self, session=session)
 
     def delete(self, session=None, **kwargs):
         u.remove_nested_dm(PGDatabase, "instance", self, session=session)

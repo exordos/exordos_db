@@ -57,6 +57,7 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
                 "version",
                 "project_id",
                 "restore_from",
+                "rollback_revision",
             )
         )
 

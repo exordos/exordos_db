@@ -35,7 +35,8 @@ class MigrationStep(migrations.AbstarctMigrationStep):
 ALTER TABLE postgres_instances
     ADD COLUMN backup JSONB,
     ADD COLUMN restore_from JSONB,
-    ADD COLUMN roles_imported BOOLEAN NOT NULL DEFAULT FALSE;
+    ADD COLUMN roles_imported BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN rollback_revision INT;
 """,
             # Users imported from a restored cluster have only a hash
             "ALTER TABLE postgres_users ALTER COLUMN password DROP NOT NULL;",
@@ -50,6 +51,7 @@ ALTER TABLE postgres_instances
             "ALTER TABLE postgres_users ALTER COLUMN password SET NOT NULL;",
             """\
 ALTER TABLE postgres_instances
+    DROP COLUMN IF EXISTS rollback_revision,
     DROP COLUMN IF EXISTS roles_imported,
     DROP COLUMN IF EXISTS restore_from,
     DROP COLUMN IF EXISTS backup;

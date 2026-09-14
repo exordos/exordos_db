@@ -158,7 +158,11 @@ are taken by the reinstalled nodes.
 }
 ```
 
-- `endpoint` is `http://` or `https://` with an optional port and no path.
+- `endpoint` is `http://` or `https://` with an optional port and no path. The
+  storage is reached from the nodes of the instance, so loopback, link-local
+  (e.g. the metadata service), unspecified and multicast addresses and
+  `localhost` are rejected; private addresses are allowed.
+- `path` is an absolute path in the bucket without `..` segments.
 - `uri_style` is `path` (default, required for IP endpoints) or `host`.
 - The instance uuid is the pgBackRest stanza, so instances may share a bucket
   and a `path`.
@@ -175,15 +179,16 @@ Credentials are stored in the instance and returned by the API to everyone who
 can read the instance.
 
 Every 15 minutes `exordos-db-pg-backup.timer` takes a backup on the primary
-when one is due. When the storage is unreachable WAL is kept up to a quarter
-of `disk_size` and dropped after that, so the database keeps running at the
-cost of a gap in point-in-time recovery.
+when one is due, unless the cluster is paused for a rollback. When the storage
+is unreachable WAL is kept up to a quarter of `disk_size` and dropped after
+that, so the database keeps running at the cost of a gap in point-in-time
+recovery.
 
 ## Restoring to a Point in Time
 
 A new instance can start from the backups of another one instead of an empty
-database. `restore_from` is set on creation only; the source instance may
-already be deleted, its backups are found by the storage and the stanza.
+database. The source instance may already be deleted, its backups are found by
+the storage and the stanza.
 
 ```json
 {
@@ -221,6 +226,69 @@ already be deleted, its backups are found by the storage and the stanza.
 - The new instance doesn't take backups unless its own `backup` is set. It
   uses its own stanza, so the source's backups stay intact even in the same
   bucket and `path`.
+
+### Rolling an Existing Instance Back
+
+`restore_from` of an existing instance can be changed to roll its data back in
+place, without a new instance. The cluster keeps its uuid, addresses and
+backups; only the data goes back to the target time.
+
+```json
+{
+  "restore_from": {
+    "kind": "s3",
+    "endpoint": "http://10.20.0.30:9000",
+    "bucket": "dbaas-backups",
+    "access_key": "backup",
+    "secret_key": "secret",
+    "stanza": "INSTANCE_UUID",
+    "target": {"kind": "time", "time": "2026-09-14T10:30:00Z"},
+    "revision": 1
+  }
+}
+```
+
+- `restore_from` is the desired origin of the data, so applying the same
+  value again (e.g. re-applying a manifest) does nothing.
+- A rollback happens only when the stanza, `target` or `revision` differ
+  from the current source *and* `revision` is higher than any revision used
+  before. Changing the target without raising `revision` is rejected with 400,
+  so an edit can't roll a database back by accident. Raising `revision` with
+  the same target rolls back to it again.
+- Other fields (e.g. rotated credentials) can change without a rollback. New
+  credentials reach a rollback in progress too.
+- `target` has to be a `time`: the end of the archive is the state the
+  instance already has.
+- `stanza` must be the instance's own uuid: another instance's backups have a
+  different system identifier, restore those into a new instance.
+- Setting `restore_from` to `null` leaves the data as it is.
+
+The leader restores only the files that differ from the target and
+recovers, and the replicas are rewound to the new timeline. The cluster is
+unavailable meanwhile and restarts once more, briefly, after it. The first
+backup after a rollback is always full.
+
+- Before anything is stopped the leader archives the WAL written up to now and
+  checks that a backup finished before the target. If either fails, the
+  rollback fails with the data untouched.
+- Backups taken past the point a rollback went to, before the rollback
+  itself, are on an abandoned timeline and aren't restored from, in place or
+  into a new instance. They still count against `retention_full`, and every
+  rollback takes a full backup, so after a few rollbacks the earliest point
+  to roll back to moves forward.
+- If the restore fails, the cluster stays paused; setting the source again
+  with a higher `revision` starts the rollback over. `revision` has to be
+  higher than every revision used before, including those of instances whose
+  `restore_from` was cleared afterwards.
+- A replica that can't be rewound is cloned from the leader again.
+- A node that wasn't part of the cluster during the rollback (added or
+  reinstalled later, or with its agent down) learns from the cluster that it
+  has been applied and doesn't repeat it.
+- If the node leading a rollback is gone, another node takes the rollback
+  over. `nodes_number` can't be decreased while the instance is restored or
+  rolled back.
+- A repository that fails (wrong keys, unreachable storage) doesn't stop users,
+  databases and settings from being applied.
 
 Users and databases of the restored cluster appear in the API once the
 recovery is over. Imported users have no `password` (`null`) and keep their
