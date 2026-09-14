@@ -175,6 +175,56 @@ and takes a backup on the primary when one is due. When the storage is
 unreachable WAL is kept up to a quarter of `disk_size` and dropped after that,
 so the database keeps running at the cost of a gap in point-in-time recovery.
 
+## Restoring to a Point in Time
+
+A new instance can start from the backups of another one instead of an empty
+database. `restore_from` is set on creation only; the source instance may
+already be deleted, its backups are found by the storage and the stanza.
+
+```json
+{
+  "name": "restored-postgres",
+  "cpu": 4,
+  "ram": 2048,
+  "disk_size": 100,
+  "nodes_number": 3,
+  "sync_replica_number": 1,
+  "version": "/v1/types/postgres/versions/VERSION_UUID",
+  "restore_from": {
+    "kind": "s3",
+    "endpoint": "http://10.20.0.30:9000",
+    "bucket": "dbaas-backups",
+    "access_key": "backup",
+    "secret_key": "secret",
+    "path": "/exordos_db",
+    "stanza": "SOURCE_INSTANCE_UUID",
+    "target_time": "2026-09-14T10:30:00Z"
+  }
+}
+```
+
+- The storage fields and `encryption_key` are the same as in `backup` of the
+  source instance.
+- `stanza` is the uuid of the source instance.
+- `target_time` is the moment to recover to; `null` replays the whole archive.
+  A time in the future is rejected. It has to be covered by the archive: after
+  the end of the oldest kept full backup and before the last archived WAL.
+- `version` and `disk_size` must fit the backup: the same PostgreSQL major
+  version and enough space for the data.
+- The new instance doesn't take backups unless its own `backup` is set. It
+  uses its own stanza, so the source's backups stay intact even in the same
+  bucket and `path`.
+
+Patroni bootstraps the cluster with `exordos-db-pg-restore`, which runs
+`pgbackrest restore`; PostgreSQL replays WAL up to the target and is promoted,
+replicas are cloned from it afterwards.
+
+Users and databases of the restored cluster appear in the API once the
+recovery is over. Imported users have no `password` (`null`) and keep their
+password hashes, so existing clients keep working; setting `password` changes
+it as usual. Users without a password and databases owned by roles DBaaS
+doesn't manage (e.g. `postgres`) aren't imported and get dropped.
+
 ## Validation Rules
 
 ### Instance Validation

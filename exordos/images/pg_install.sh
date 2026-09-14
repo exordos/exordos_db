@@ -59,6 +59,7 @@ fi
 # Create links to venv
 sudo ln -sf "$VENV_PATH/bin/exordos-universal-agent" "/usr/bin/exordos-db-pg-agent"
 sudo ln -sf "$VENV_PATH/bin/exordos-db-pg-backup" "/usr/bin/exordos-db-pg-backup"
+sudo ln -sf "$VENV_PATH/bin/exordos-db-pg-restore" "/usr/bin/exordos-db-pg-restore"
 
 deactivate
 

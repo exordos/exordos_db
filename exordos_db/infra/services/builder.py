@@ -57,7 +57,7 @@ raft:
   partner_addrs: {raft_partner_addrs}
 
 bootstrap:
-  dcs:
+{bootstrap_method}  dcs:
     ttl: 30
     loop_wait: 10
     retry_timeout: 10
@@ -137,6 +137,20 @@ tags:
   clonefrom: false
   nosync: false
 """
+
+# pgBackRest writes the recovery settings, Patroni keeps them for the
+# bootstrap only and drops them afterwards, so replicas don't inherit them
+RESTORE_BOOTSTRAP_METHOD = """\
+  method: pgbackrest
+  pgbackrest:
+    command: /usr/bin/exordos-db-pg-restore
+    keep_existing_recovery_conf: true
+    no_params: true
+"""
+
+
+def bootstrap_method(instance: models.PGInstance) -> str:
+    return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
 
 
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
@@ -268,12 +282,20 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                 raft_partner_addrs=node_raft_members,
                 sync_mode=sync_mode,
                 sync_replica_number=instance.sync_replica_number,
+                bootstrap_method=bootstrap_method(instance),
                 on_change=instance.OnReloadFunc,
             )
             config = instance._create_config(
                 uuid.UUID(node_uuid), self._project_id, content
             )
             new_objects.append(config)
+
+            if instance.restore_from is not None:
+                new_objects.append(
+                    instance._create_restore_config(
+                        uuid.UUID(node_uuid), self._project_id
+                    )
+                )
 
         tgt_nodeset = None
 

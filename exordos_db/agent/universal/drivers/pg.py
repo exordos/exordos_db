@@ -130,8 +130,9 @@ class PGInstance(meta.MetaDataPlaneModel):
         ra_types.String(min_length=1, max_length=512),
         required=True,
     )
-    databases = properties.property(ra_types.Dict(), default={})
-    users = properties.property(ra_types.Dict(), default={})
+    # None leaves them unmanaged, e.g. until a restored cluster's are imported
+    databases = properties.property(ra_types.AllowNone(ra_types.Dict()), default={})
+    users = properties.property(ra_types.AllowNone(ra_types.Dict()), default={})
     nodes_number = properties.property(ra_types.Integer(min_value=1, max_value=16))
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
@@ -340,13 +341,21 @@ WHERE d.datname not in """
             LOG.debug("Not a primary node, skipping the rest of dump_to_dp.")
             return
 
+        # A primary is out of recovery, restore_command is no longer used
+        if pgbackrest.remove_restore_config():
+            LOG.info("Restore config removed")
+
         # The stanza has to exist before archiving is turned on
         self._reconcile_backup_stanza()
         self._reconcile_DCS()
-        self._reconcile_target_users()
-        self._reconcile_target_databases()
+        if self.users is not None:
+            self._reconcile_target_users()
+        if self.databases is not None:
+            self._reconcile_target_databases()
 
     def restore_from_dp(self) -> None:
+        self.users = {}
+        self.databases = {}
         self._fill_actual_users()
         self._fill_actual_databases()
         config = self.c.pclient.config_get()
