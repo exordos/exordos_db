@@ -39,6 +39,11 @@ sudo apt update
 sudo apt install -y \
     libev-dev yq watchdog
 
+# Unattended upgrades restart services, Patroni and the agent among them, in
+# the middle of the cluster's work: the leader goes down
+sudo systemctl disable --now apt-daily.timer apt-daily-upgrade.timer
+sudo apt-get purge -y unattended-upgrades
+
 # Install exordos db
 sudo mkdir -p $GC_CFG_DIR
 sudo mkdir -p $WORK_DIR
