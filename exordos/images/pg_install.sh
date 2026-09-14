@@ -58,6 +58,8 @@ fi
 
 # Create links to venv
 sudo ln -sf "$VENV_PATH/bin/exordos-universal-agent" "/usr/bin/exordos-db-pg-agent"
+sudo ln -sf "$VENV_PATH/bin/exordos-db-pg-backup" "/usr/bin/exordos-db-pg-backup"
+sudo ln -sf "$VENV_PATH/bin/exordos-db-pg-restore" "/usr/bin/exordos-db-pg-restore"
 
 deactivate
 
@@ -66,9 +68,13 @@ sudo cp "$GC_PATH/etc/systemd/exordos-db-pg-agent.service" $SYSTEMD_SERVICE_DIR
 sudo mkdir -p "${SYSTEMD_SERVICE_DIR}/exordos-universal-agent.service.d"
 sudo cp "$GC_PATH/etc/systemd/exordos-universal-agent.service.d/pg-bootstrap.conf" \
     "${SYSTEMD_SERVICE_DIR}/exordos-universal-agent.service.d/pg-bootstrap.conf"
+sudo cp "$GC_PATH/etc/systemd/exordos-db-pg-backup.service" $SYSTEMD_SERVICE_DIR
+sudo cp "$GC_PATH/etc/systemd/exordos-db-pg-backup.timer" $SYSTEMD_SERVICE_DIR
 
 # Enable exordos db services
 sudo systemctl enable exordos-db-pg-agent
+# The service does nothing until the agent enables backups
+sudo systemctl enable exordos-db-pg-backup.timer
 
 
 # Patroni
@@ -78,7 +84,8 @@ sudo apt-get update
 sudo apt-get install postgresql-common -y
 sudo YES=1 /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
 sudo apt-get update
-sudo apt -y install "postgresql-${PG_VERSION}"
+sudo apt -y install "postgresql-${PG_VERSION}" pgbackrest
+sudo install -d -o postgres -g postgres -m 750 /etc/pgbackrest /var/spool/pgbackrest /var/log/pgbackrest
 sudo systemctl disable --now "postgresql@${PG_VERSION}-main"
 sudo systemctl disable --now postgresql
 sudo ln -s /usr/lib/postgresql/$PG_VERSION/bin/* /usr/sbin/

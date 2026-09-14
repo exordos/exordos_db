@@ -25,6 +25,7 @@ from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.paas.services import builder
 
 from exordos_db.paas.dm import models
+from exordos_db.user_api.dm import models as user_models
 
 LOG = logging.getLogger(__name__)
 NODE_KIND = sdk_models.Node.get_resource_kind()
@@ -56,6 +57,42 @@ class PaaSBuilder(builder.PaaSBuilder):
         return scheduled
 
 
+def restore_status(
+    actuals: tp.Iterable[models.PGInstanceNode | None],
+) -> dict[str, tp.Any] | None:
+    """Sum up what the nodes report about the restore in progress."""
+    reports = [
+        actual.restore_state
+        for actual in actuals
+        if actual is not None and actual.restore_state is not None
+    ]
+    if not reports:
+        return None
+    # Another node may still be restoring after this one failed to
+    return next((r for r in reports if not r["error"]), reports[0])
+
+
+def backup_status(
+    instance: models.PGInstance,
+    actuals: tp.Iterable[models.PGInstanceNode | None],
+) -> dict[str, tp.Any] | None:
+    """Take what the primary reports about the backups."""
+    if instance.backup is None:
+        return None
+    reports = [
+        actual.backup_state
+        for actual in actuals
+        if actual is not None and actual.backup_state is not None
+    ]
+    if not reports:
+        # No primary reports meanwhile, e.g. during a failover
+        return instance.backup_status
+    # A former primary whose agent went down keeps its last report; the
+    # current one is on the latest timeline
+    latest = max(reports, key=lambda r: r.get("timeline") or 0)
+    return {"error": latest["error"]}
+
+
 class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
     def __init__(
         self,
@@ -74,6 +111,131 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
 
     def _get_databases(self, instance):
         return {d.name: {"owner": d.owner.name} for d in instance.get_databases()}
+
+    def _get_backup(self, instance: models.PGInstance) -> dict[str, tp.Any] | None:
+        if instance.backup is None:
+            return None
+
+        options = instance.backup.pgbackrest_repo_options()
+        # WAL lives on the data disk. When the repository is unreachable
+        # pgBackRest drops WAL past this size instead of filling the disk,
+        # which breaks PITR but keeps the database running.
+        options["archive-push-queue-max"] = f"{max(1, instance.disk_size // 4)}GiB"
+        return {
+            "stanza": str(instance.uuid),
+            "options": options,
+            "schedule": {
+                "full_interval_hours": instance.backup.full_interval_hours,
+                "incr_interval_hours": instance.backup.incr_interval_hours,
+            },
+        }
+
+    @staticmethod
+    def _roles_managed(instance: models.PGInstance) -> bool:
+        return instance.restore_from is None or instance.roles_imported
+
+    def _import_roles(
+        self,
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        """Take users and databases of a restored cluster under management.
+
+        The primary reports them once its recovery is over: they are
+        imported once, what the replayed WAL does to them has to be in.
+        """
+        for actual in paas_collection.actuals():
+            if actual is not None and actual.found_roles is not None:
+                break
+        else:
+            return
+
+        found_users = actual.found_roles["users"]
+        found_databases = actual.found_roles["databases"]
+
+        # By name: rows of an earlier, interrupted pass or created through
+        # the API meanwhile are kept, not doubled
+        users = {u.name: u for u in instance.get_users()}
+        databases = {d.name for d in instance.get_databases()}
+        for name, user in found_users.items():
+            if name in users:
+                continue
+            if not user.get("pw_hash"):
+                LOG.warning(
+                    "User %s of the restored instance %s has no password, "
+                    "it isn't imported and will be dropped",
+                    name,
+                    instance.uuid,
+                )
+                continue
+            users[name] = user_models.PGUser(
+                name=name,
+                password_hash=user["pw_hash"],
+                instance=instance,
+                project_id=instance.project_id,
+            )
+            users[name].insert()
+
+        for name, database in found_databases.items():
+            if name in databases:
+                continue
+            if (owner := users.get(database["owner"])) is None:
+                LOG.warning(
+                    "Database %s of the restored instance %s is owned by %s "
+                    "that isn't imported, it will be dropped",
+                    name,
+                    instance.uuid,
+                    database["owner"],
+                )
+                continue
+            user_models.PGDatabase(
+                name=name,
+                owner=owner,
+                instance=instance,
+                project_id=instance.project_id,
+            ).insert()
+
+        instance.roles_imported = True
+        instance.update(force=True)
+        LOG.info(
+            "Imported %d users and %d databases of the restored instance %s",
+            len(users),
+            len(found_databases),
+            instance.uuid,
+        )
+
+    @staticmethod
+    def _update_restore_status(
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        status = restore_status(paas_collection.actuals())
+        if status != instance.restore_status:
+            instance.restore_status = status
+            instance.update(force=True)
+
+    @staticmethod
+    def _update_backup_status(
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        status = backup_status(instance, paas_collection.actuals())
+        if status != instance.backup_status:
+            instance.backup_status = status
+            instance.update(force=True)
+
+    def actualize_paas_objects_source_data_plane(
+        self,
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> tp.Collection[ua_models.TargetResourceKindAwareMixin]:
+        self._update_restore_status(instance, paas_collection)
+        self._update_backup_status(instance, paas_collection)
+        if not self._roles_managed(instance):
+            self._import_roles(instance, paas_collection)
+        return super().actualize_paas_objects_source_data_plane(
+            instance, paas_collection
+        )
 
     def create_paas_objects(
         self, instance: models.PGInstance
@@ -97,9 +259,11 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
 
         actual_resources = []
 
-        users = self._get_users(instance)
+        adopt_roles = not self._roles_managed(instance)
+        users = {} if adopt_roles else self._get_users(instance)
+        databases = {} if adopt_roles else self._get_databases(instance)
 
-        databases = self._get_databases(instance)
+        backup = self._get_backup(instance)
 
         nodeset = instance.get_actual_nodeset()
         nodes_by_idx = list(nodeset.nodes.keys())
@@ -115,6 +279,8 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
                     sync_replica_number=instance.sync_replica_number,
                     users=users,
                     databases=databases,
+                    backup=backup,
+                    adopt_roles=adopt_roles,
                 )
             )
 

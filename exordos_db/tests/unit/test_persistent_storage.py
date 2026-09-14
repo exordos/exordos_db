@@ -134,6 +134,7 @@ def test_bootstrap_keeps_patroni_stopped_until_both_paths_are_migrated(bootstrap
         "find_disk",
         "prepare /dev/test-disk /persist",
         "logs /var/log /persist/var/log systemd-journald rsyslog",
+        "install -d -m 0770 -o postgres -g postgres /var/log/pgbackrest",
         f"migrate {DATA} /persist{DATA}",
         f"migrate {RAFT} /persist{RAFT}",
         "complete",
@@ -156,7 +157,10 @@ def test_data_of_another_postgres_uid_is_taken_over(bootstrap):
     # A newer base image gave postgres 102:109 where the data has 104:110
     result, calls = bootstrap(data_owner="104 110")
     assert result.returncode == 0, result.stderr
-    paths = f"/persist{DATA} /persist{RAFT} /persist/var/log/postgresql"
+    paths = (
+        f"/persist{DATA} /persist{RAFT} /persist/var/log/postgresql"
+        " /persist/var/log/pgbackrest"
+    )
     chown = f"find {paths} -uid 104 -exec chown -h postgres {{}} +"
     chgrp = f"find {paths} -gid 110 -exec chgrp -h postgres {{}} +"
     migrate = calls.index(f"migrate {DATA} /persist{DATA}")

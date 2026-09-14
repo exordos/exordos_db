@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
 import typing as tp
 import uuid as sys_uuid
 
@@ -21,6 +22,7 @@ from gcl_sdk.agents.universal.dm import models as ua_models
 from gcl_sdk.infra import constants as sdk_c
 from gcl_sdk.infra.dm import models as sdk_models
 
+from exordos_db.common import pgbackrest
 from exordos_db.user_api.dm import models
 
 ROOT_DISK_SIZE = 6
@@ -54,6 +56,7 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
                 "sync_replica_number",
                 "version",
                 "project_id",
+                "restore_from",
             )
         )
 
@@ -81,6 +84,27 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
         )
 
         return config
+
+    def _create_restore_config(
+        self, node_uuid: sys_uuid.UUID, project_id: sys_uuid.UUID
+    ) -> sdk_models.Config:
+        return sdk_models.Config(
+            uuid=sys_uuid.uuid5(self.uuid, f"restore-config-{node_uuid}"),
+            name=f"restore-{node_uuid}",
+            project_id=project_id,
+            status=sdk_c.InstanceStatus.NEW.value,
+            target=sdk_models.NodeTarget(
+                node=node_uuid,
+            ),
+            body=sdk_models.TextBodyConfig(
+                content=json.dumps(self.restore_from.restore_spec(), sort_keys=True),
+            ),
+            path=pgbackrest.RESTORE_SPEC_FILE,
+            owner="postgres",
+            group="postgres",
+            # Carries repository credentials
+            mode="0600",
+        )
 
     def get_infra(
         self,

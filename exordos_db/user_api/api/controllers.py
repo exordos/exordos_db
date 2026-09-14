@@ -19,6 +19,7 @@ from restalchemy.api import constants
 from restalchemy.api import controllers as ra_controllers
 from restalchemy.api import field_permissions as field_p
 from restalchemy.api import resources as ra_resources
+from restalchemy.common import exceptions as ra_exc
 
 from exordos_db.user_api.api import versions
 from exordos_db.user_api.dm import models
@@ -71,6 +72,9 @@ class PGInstanceController(
             fields={
                 "status": {constants.ALL: field_p.Permissions.RO},
                 "ipsv4": {constants.ALL: field_p.Permissions.RO},
+                "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
+                "restore_status": {constants.ALL: field_p.Permissions.RO},
+                "backup_status": {constants.ALL: field_p.Permissions.RO},
             },
         ),
     )
@@ -89,6 +93,10 @@ class PGDatabaseController(
         convert_underscore=False,
         process_filters=True,
     )
+
+
+class PasswordRequiredError(ra_exc.ValidationErrorException):
+    message = "password is required"
 
 
 class PGUserController(
@@ -110,3 +118,15 @@ class PGUserController(
             },
         ),
     )
+
+    # Only users imported from a restored cluster have no password, the API
+    # asks for one as it always did
+    def create(self, **kwargs):
+        if kwargs.get("password") is None:
+            raise PasswordRequiredError()
+        return super().create(**kwargs)
+
+    def update(self, parent_resource, uuid, **kwargs):
+        if "password" in kwargs and kwargs["password"] is None:
+            raise PasswordRequiredError()
+        return super().update(parent_resource, uuid, **kwargs)
