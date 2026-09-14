@@ -14,10 +14,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
+import types
+import uuid
+
 import pytest
 from restalchemy.common import exceptions as ra_exc
+import yaml
 
 from exordos_db.common import pgbackrest
+from exordos_db.infra.services import builder as infra_builder
 from exordos_db.user_api.dm import backups
 
 HOUR = 3600
@@ -154,6 +160,93 @@ class TestConfig:
         stanza = _spec()
         stanza["stanza"] = "other"
         assert pgbackrest.repo_fingerprint(stanza) != base
+
+
+SOURCE_UUID = "1b1bc0de-0000-4000-8000-000000000001"
+
+
+def _restore_source(**kwargs):
+    view = {**S3_VIEW, "stanza": SOURCE_UUID, **kwargs}
+    return backups.RESTORE_SOURCE_TYPE.from_simple_type(view)
+
+
+class TestS3RestoreSource:
+    def test_latest(self):
+        spec = _restore_source(encryption_key="k3y").restore_spec()
+
+        assert spec["stanza"] == SOURCE_UUID
+        assert spec["target_time"] is None
+        assert spec["options"]["repo1-s3-endpoint"] == "http://10.20.0.30:9000"
+        assert spec["options"]["repo1-cipher-pass"] == "k3y"
+        # Retention is a matter of the instance taking backups
+        assert "repo1-retention-full" not in spec["options"]
+
+    def test_target_time_in_utc(self):
+        source = _restore_source(target_time="2026-01-14T13:30:15.000250+03:00")
+        assert source.restore_spec()["target_time"] == "2026-01-14 10:30:15.000250+00"
+
+    def test_future_target_time(self):
+        future = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+            hours=1
+        )
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            _restore_source(target_time=future.isoformat())
+
+    def test_schedule_is_not_accepted(self):
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            _restore_source(retention_full=2)
+
+    def test_stanza_required(self):
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            backups.RESTORE_SOURCE_TYPE.from_simple_type(S3_VIEW)
+
+
+class TestRestore:
+    def test_args_latest(self):
+        assert pgbackrest.restore_args({"target_time": None}) == [
+            "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
+            "restore",
+        ]
+
+    def test_args_target_time(self):
+        spec = {"target_time": "2026-09-14 10:30:15.000250+00"}
+        assert pgbackrest.restore_args(spec) == [
+            "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
+            "--type=time",
+            "--target=2026-09-14 10:30:15.000250+00",
+            "--target-action=promote",
+            "restore",
+        ]
+
+    @pytest.mark.parametrize("restore", [False, True])
+    def test_patroni_config(self, restore):
+        instance = types.SimpleNamespace(
+            restore_from=_restore_source() if restore else None
+        )
+
+        config = yaml.safe_load(
+            infra_builder.PATRONI_CONF_TEMPLATE.format(
+                cluster_name="demo",
+                node_name=str(uuid.uuid4()),
+                node_ip="10.20.0.40",
+                raft_partner_addrs=["10.20.0.40:5010"],
+                sync_mode="false",
+                sync_replica_number=0,
+                bootstrap_method=infra_builder.bootstrap_method(instance),
+            )
+        )
+
+        bootstrap = config["bootstrap"]
+        assert "dcs" in bootstrap
+        if restore:
+            assert bootstrap["method"] == "pgbackrest"
+            assert bootstrap["pgbackrest"] == {
+                "command": "/usr/bin/exordos-db-pg-restore",
+                "keep_existing_recovery_conf": True,
+                "no_params": True,
+            }
+        else:
+            assert "method" not in bootstrap
 
 
 class TestChooseBackupType:

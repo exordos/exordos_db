@@ -71,6 +71,7 @@ class PGInstanceController(
             fields={
                 "status": {constants.ALL: field_p.Permissions.RO},
                 "ipsv4": {constants.ALL: field_p.Permissions.RO},
+                "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
             },
         ),
     )
