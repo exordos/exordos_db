@@ -58,7 +58,7 @@ def main() -> int:
         LOG.info("Waiting for %s", pgbackrest.RESTORE_SPEC_FILE)
         time.sleep(5)
 
-    source = [spec["stanza"], spec["target_time"]]
+    source = [spec["stanza"], spec["target_time"], spec.get("before_revision")]
     state = pgbackrest.load_restore_state()
     if state is None or state.get("source") != source:
         state = {"source": source, "attempts": 0, "error": None}
@@ -75,15 +75,15 @@ def main() -> int:
     state = {**state, "attempts": state["attempts"] + 1, "error": None}
     pgbackrest.save_restore_state({**state, "phase": RESTORING})
     LOG.info(
-        "Restoring stanza %s to %s",
-        spec["stanza"],
-        spec["target_time"] or "the end of the archive",
+        "Restoring stanza %s to %s", spec["stanza"], pgbackrest.describe_target(spec)
     )
     try:
         pgbackrest.write_restore_config(spec)
-        backup_set = pgbackrest.restore_backup_set(spec["stanza"], spec["target_time"])
+        stanza, backup_set = pgbackrest.restore_set(spec)
         pgbackrest.run(
-            spec["stanza"], *pgbackrest.restore_args(spec, backup_set), timeout=None
+            stanza,
+            *pgbackrest.restore_args(spec, backup_set),
+            timeout=None,
         )
     except Exception as e:
         LOG.exception("Restore of %s failed", spec["stanza"])

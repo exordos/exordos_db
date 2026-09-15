@@ -41,6 +41,10 @@ def _source(**kwargs):
     return backups.RESTORE_SOURCE_TYPE.from_simple_type(view)
 
 
+def _before_revision(revision):
+    return {"kind": "before_revision", "revision": revision}
+
+
 def _backup(**kwargs):
     view = {
         "kind": "s3",
@@ -160,6 +164,23 @@ def test_rollback_to_the_latest_is_rejected(old):
     old = _source() if old else None
     with pytest.raises(models.RestoreSourceError):
         _rollback(old, _source(target={"kind": "latest"}, revision=1))
+
+
+def test_rollback_to_the_state_before_an_earlier_one():
+    old = _source(revision=2)
+    new = _source(target=_before_revision(2), revision=3)
+
+    assert _rollback(old, new, applied=2) == 3
+
+    spec = _rendered(3, new)
+    assert spec["before_revision"] == 2
+    assert spec["target_time"] is None
+
+
+def test_state_before_a_rollback_that_never_was_is_rejected():
+    new = _source(target=_before_revision(5), revision=6)
+    with pytest.raises(models.RestoreSourceError):
+        _rollback(_source(revision=2), new, applied=2)
 
 
 def test_nodes_cant_be_removed_during_a_rollback():

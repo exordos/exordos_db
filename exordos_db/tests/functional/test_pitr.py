@@ -55,6 +55,10 @@ def _at(moment):
     return {"kind": "time", "time": moment}
 
 
+def _before(revision):
+    return {"kind": "before_revision", "revision": revision}
+
+
 def _append(cluster, note, count):
     cluster.sql(
         "set role app_user; create table if not exists orders "
@@ -449,6 +453,101 @@ def test_rollback_into_an_undone_interval(scenario, s3_storage):
     source.wait_rows(
         {"first": 10, "before recycling": 4, "tail": 6, "before failure": 3}
     )
+    scenario["into_undone"] = True
+
+
+def _undo(scenario, s3_storage, before_revision, revision):
+    source = scenario["source"]
+    restore_from = _source(
+        scenario, s3_storage, target=_before(before_revision), revision=revision
+    )
+    source.api.call("PUT", source.path, {"restore_from": restore_from}, expect=200)
+
+
+def test_rollback_is_undone(scenario, s3_storage):
+    _require(scenario, "into_undone")
+    source = scenario["source"]
+    timelines = {m["timeline"] for m in source.members()}
+    _append(source, "unarchived", 1)
+
+    # Kept by rollback 7, taken right after "after recovery"
+    _undo(scenario, s3_storage, before_revision=7, revision=8)
+    source.wait_rollback(8)
+
+    source.wait_rows(
+        {
+            "first": 10,
+            "before recycling": 4,
+            "tail": 6,
+            "before failure": 3,
+            "after recovery": 2,
+        }
+    )
+    # A timeline no rollback has used, and archiving goes on on it
+    assert source.timeline(source.leader()) > max(timelines)
+    source.archive_now()
+    assert source.sql("select failed_count from pg_stat_archiver") == "0"
+    scenario["undo"] = True
+
+
+def test_undo_is_undone_in_turn(scenario, s3_storage):
+    _require(scenario, "undo")
+    source = scenario["source"]
+    _append(source, "after undo", 5)
+
+    # Back to the state rollback 8 replaced, with the row that wasn't archived
+    _undo(scenario, s3_storage, before_revision=8, revision=9)
+    source.wait_rollback(9)
+
+    source.wait_rows(
+        {
+            "first": 10,
+            "before recycling": 4,
+            "tail": 6,
+            "before failure": 3,
+            "unarchived": 1,
+        }
+    )
+    scenario["undo_twice"] = True
+
+
+def test_state_before_a_rollback_is_cloned(scenario, instances, s3_storage):
+    _require(scenario, "rolled_back")
+    clone = instances(
+        "pitr-before", restore_from=_source(scenario, s3_storage, target=_before(1))
+    )
+
+    clone.wait_status("ACTIVE")
+
+    # What rollback 1 replaced: the late changes
+    assert clone.rows() == {"late": 5}
+    assert clone.table_exists("junk")
+    assert set(clone.users()) == {"app_user", "late_user"}
+    assert clone.can_login("app_user", APP_NEW_PASSWORD, "appdb")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"target": {"kind": "before_revision", "revision": 999}},
+        # A target is of one kind only
+        {
+            "target": {
+                "kind": "before_revision",
+                "revision": 1,
+                "time": "2026-09-14T10:30:00Z",
+            }
+        },
+    ],
+)
+def test_invalid_undo_is_rejected(scenario, s3_storage, change):
+    _require(scenario, "rolled_back")
+    source = scenario["source"]
+    restore_from = _source(scenario, s3_storage, revision=1000, **change)
+
+    response = source.api.call("PUT", source.path, {"restore_from": restore_from})
+
+    assert response.status_code == 400, response.text
 
 
 def test_repository_errors_dont_hold_up_the_roles(scenario, s3_storage):

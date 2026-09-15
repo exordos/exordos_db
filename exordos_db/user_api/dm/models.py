@@ -106,7 +106,8 @@ def rollback_for_update(
     if isinstance(new.target, backups.RestoreLatest):
         # The end of the archive is the state the instance already has
         raise RestoreSourceError(
-            reason="target has to be a time to roll the data back in place"
+            reason="target has to be a time or the state before a rollback to "
+            "roll the data back in place"
         )
 
     revisions = [-1 if old is None else old.revision]
@@ -116,6 +117,13 @@ def rollback_for_update(
         raise RestoreSourceError(
             reason=f"revision must be greater than {max(revisions)} "
             "to roll the data back in place"
+        )
+    target = new.target
+    if isinstance(target, backups.RestoreBeforeRevision) and target.revision > max(
+        revisions
+    ):
+        raise RestoreSourceError(
+            reason=f"target.revision must not be greater than {max(revisions)}"
         )
     if new.stanza != instance_uuid:
         raise RestoreSourceError(

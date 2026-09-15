@@ -61,8 +61,9 @@ class TestLeader:
     def test_single_node(self):
         assert _decide(_state(Phase.PAUSED), True, [LEADER], "a") is Action.START_JOB
 
-    def test_waits_for_job(self):
-        state = _state(Phase.RESTORING)
+    @pytest.mark.parametrize("phase", [Phase.SAVING, Phase.RESTORING])
+    def test_waits_for_job(self, phase):
+        state = _state(phase)
         stopped_leader = _member("a", "leader", "stopped")
         members = [stopped_leader, STOPPED_REPLICA]
         assert _decide(state, True, members, "a") is Action.WAIT
@@ -146,6 +147,7 @@ OWNED_BY_B = {"id": SPEC["id"], "node": "b"}
     "phase, me",
     [
         (Phase.PAUSED, LEADER),
+        (Phase.SAVING, _member("a", "leader", "stopped")),
         (Phase.RESTORING, _member("a", "leader", "stopped")),
         (Phase.RESTORED, _member("a", "replica", "running")),
     ],
@@ -295,11 +297,28 @@ def test_state_roundtrip(tmp_path, monkeypatch):
 
 
 def test_restore_args():
-    assert pgbackrest.restore_args(SPEC, "20260914-151105F") == [
+    assert pgbackrest.restore_args(SPEC, "20260914-151105F", in_place=True) == [
         "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
         "--set=20260914-151105F",
         "--type=time",
         "--target=2026-09-14 10:27:41.638125+00",
         "--target-action=promote",
+        "restore",
+    ]
+
+
+def test_restore_args_to_the_state_before_a_rollback():
+    spec = {**SPEC, "target_time": None, "before_revision": 2}
+    assert pgbackrest.restore_args(spec, "F1_I2", in_place=True) == [
+        "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
+        "--set=F1_I2",
+        "--type=default",
+        "--target-timeline=current",
+        # The kept state has no archive, the cluster's has the timelines
+        (
+            "--recovery-option=restore_command=pgbackrest "
+            "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf "
+            f'--stanza={SPEC["stanza"]} archive-get %f "%p"'
+        ),
         "restore",
     ]

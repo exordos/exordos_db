@@ -38,14 +38,14 @@ def restores(tmp_path, monkeypatch):
     monkeypatch.setattr(pgbackrest, "load_spec", lambda path: SPEC)
     monkeypatch.setattr(pgbackrest, "write_restore_config", lambda spec: None)
     restores = Restores()
-    restores.choose = lambda stanza, target_time: "20260914-151105F"
+    restores.choose = lambda spec: "20260914-151105F"
     monkeypatch.setattr(
-        pgbackrest,
-        "restore_backup_set",
-        lambda stanza, target_time: restores.choose(stanza, target_time),
+        pgbackrest, "restore_set", lambda spec: (spec["stanza"], restores.choose(spec))
     )
     monkeypatch.setattr(
-        pgbackrest, "run", lambda stanza, *args, timeout: restores.append(args)
+        pgbackrest,
+        "run",
+        lambda stanza, *args, timeout: restores.append(args),
     )
     return restores
 
@@ -60,7 +60,7 @@ def test_restored_cluster_is_left_to_recover(restores, state):
 
     assert len(restores) == 1
     assert state() == {
-        "source": [SPEC["stanza"], SPEC["target_time"]],
+        "source": [SPEC["stanza"], SPEC["target_time"], None],
         "attempts": 1,
         "phase": "recovering",
         "error": None,
@@ -81,12 +81,12 @@ def test_bootstrap_after_a_restore_is_another_attempt(restores, state):
 def test_successful_attempt_clears_the_error_of_a_failed_one(restores, state):
     # E.g. the storage was unreachable for a moment: the instance mustn't be
     # ERROR while the retry restores it
-    def unreachable(stanza, target_time):
+    def unreachable(spec):
         raise pgbackrest.PgBackRestError("unable to connect to storage")
 
     restores.choose = unreachable
     pg_restore.main()
-    restores.choose = lambda stanza, target_time: "20260914-151105F"
+    restores.choose = lambda spec: "20260914-151105F"
 
     assert pg_restore.main() == 0
 
@@ -95,7 +95,7 @@ def test_successful_attempt_clears_the_error_of_a_failed_one(restores, state):
 
 
 def test_restore_error_is_recorded(restores, state):
-    def no_backup(stanza, target_time):
+    def no_backup(spec):
         raise pgbackrest.PgBackRestError("No backup to recover to ... from")
 
     restores.choose = no_backup

@@ -19,9 +19,11 @@ Run by the agent as a transient systemd unit, see exordos_db.common.rollback.
 """
 
 import logging
+import os
 import subprocess
 import sys
 import time
+import typing as tp
 
 from exordos_db.common import pgbackrest
 from exordos_db.common import rollback
@@ -35,10 +37,15 @@ LOG_FILE = "/var/log/postgresql/exordos-rollback.log"
 ARCHIVE_TIMEOUT = 600
 # Recovery replays WAL from the start of the chosen backup, it may be long
 RECOVERY_TIMEOUT = 7 * 24 * 3600
+# `pg_ctl -W start` returns before the server writes its pid file
+START_TIMEOUT = 60
 POLL_INTERVAL = 5
 # A backup command line ends with the command, its workers with backup:local
 BACKUP_COMMAND = " backup(:local)?$"
 BACKUP_STOP_TIMEOUT = 120
+# pgBackRest keeps its manifest in the data directory until a restore is
+# done, and the restore leaves the recovery to PostgreSQL
+RESTORE_LEFTOVERS = ("backup.manifest", "recovery.signal", "backup_label")
 
 _as_postgres = rollback.run_as_postgres
 
@@ -50,14 +57,17 @@ def run(spec: dict) -> None:
     # needs is checked while nothing is lost yet: the WAL up to now is in the
     # archive, and a backup to start the recovery from exists.
     _archive_the_tail()
-    backup_set = pgbackrest.restore_backup_set(spec["stanza"], spec["target_time"])
+    stanza, backup_set = pgbackrest.restore_set(spec)
 
     # The backup timer doesn't start one on a paused cluster, but one started
     # before the pause would copy the data while it is replaced
     _stop_backups()
     rollback.stop_postgres()
+    _keep_the_current_state(spec)
     pgbackrest.run(
-        spec["stanza"], *pgbackrest.restore_args(spec, backup_set), timeout=None
+        stanza,
+        *pgbackrest.restore_args(spec, backup_set, in_place=True),
+        timeout=None,
     )
 
     # Recover outside of Patroni: it would drop the recovery target. `pg_ctl
@@ -121,6 +131,32 @@ def _stop_backups() -> None:
         time.sleep(1)
 
 
+def _keep_the_current_state(spec: dict) -> None:
+    """Back the stopped leader up, so the rollback can be undone."""
+    if any(
+        os.path.exists(os.path.join(pgbackrest.PG_DATA_DIR, name))
+        for name in RESTORE_LEFTOVERS
+    ):
+        # The data of a rollback that failed after its restore had started:
+        # not a state the instance had, the one before that rollback is kept
+        LOG.warning("Not keeping the data of an unfinished restore")
+        return
+    if pgbackrest.find_snapshot(spec["stanza"], spec["id"]) is not None:
+        # Kept by an earlier attempt of the job
+        return
+
+    _record(spec, rollback.Phase.SAVING, started=True)
+    if _cluster_state() != "shut down":
+        # A server that crashed before the job: an offline backup of it
+        # would recover to its last checkpoint only
+        _as_postgres(
+            PG_CTL, "-D", pgbackrest.PG_DATA_DIR, "-w", "-l", LOG_FILE, "start"
+        )
+        rollback.stop_postgres()
+    pgbackrest.take_snapshot(spec["stanza"], spec["id"])
+    _record(spec, rollback.Phase.RESTORING, started=True)
+
+
 def _cluster_state() -> str:
     control = _as_postgres(PG_CONTROLDATA, "-D", pgbackrest.PG_DATA_DIR).stdout
     for line in control.splitlines():
@@ -130,12 +166,16 @@ def _cluster_state() -> str:
 
 
 def _wait_for_promotion() -> None:
-    deadline = time.monotonic() + RECOVERY_TIMEOUT
+    started = time.monotonic()
+    deadline = started + RECOVERY_TIMEOUT
+    running = False
     while (state := _cluster_state()) != "in production":
         status = _as_postgres(
             PG_CTL, "-D", pgbackrest.PG_DATA_DIR, "status", check=False
         )
-        if status.returncode == 3:
+        if status.returncode != 3:
+            running = True
+        elif running or time.monotonic() > started + START_TIMEOUT:
             raise RuntimeError(
                 f"PostgreSQL stopped during the recovery ({state}), see {LOG_FILE}"
             )
@@ -170,11 +210,11 @@ def main() -> int:
         return 1
 
     _record(spec, rollback.Phase.RESTORED)
-    LOG.info("Rolled back to %s", spec["target_time"])
+    LOG.info("Rolled back to %s", pgbackrest.describe_target(spec))
     return 0
 
 
-def _record(spec: dict, phase: rollback.Phase, **extra: str) -> None:
+def _record(spec: dict, phase: rollback.Phase, **extra: tp.Any) -> None:
     # A rollback with a higher revision may have replaced this one meanwhile,
     # its progress must not be overwritten with this outcome
     current = rollback.load_state()

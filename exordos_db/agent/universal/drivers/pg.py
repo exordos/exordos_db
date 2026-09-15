@@ -451,17 +451,18 @@ WHERE d.datname not in """
         active_jobs = self._rollback_jobs_active()
         # Including a job of a superseded rollback, which is waited for
         job_active = bool(active_jobs)
+        job_phases = [p.value for p in rollback.JOB_PHASES]
         if (
             state is not None
             and state["id"] == spec["id"]
-            and state["phase"] == rollback.Phase.RESTORING.value
+            and state["phase"] in job_phases
             and rollback.job_unit(spec["id"]) not in active_jobs
         ):
             # The job records its outcome, a job that is gone without one
             # was killed, e.g. by a reboot. One that never started, e.g. the
             # agent restarted before starting it, is started again.
             state = rollback.load_state()
-            if state is not None and state["phase"] == rollback.Phase.RESTORING.value:
+            if state is not None and state["phase"] in job_phases:
                 if state.get("started"):
                     rollback.save_state(
                         spec,

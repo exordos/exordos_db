@@ -63,6 +63,9 @@ STANZA_MARKER_FILE = f"{cc.WORK_DIR}/backup_stanza.sha256"
 PG_DATA_DIR = f"{cc.PATRONI_DIR}/data"
 PG_SOCKET_DIR = "/var/run/postgresql"
 
+# Revision of the rollback that kept the state
+SNAPSHOT_ANNOTATION = "exordos-before-revision"
+
 DISABLED_ARCHIVE_COMMAND = ":"
 
 FIXED_GLOBAL_OPTIONS = {
@@ -101,13 +104,19 @@ def render_config(spec: dict[str, tp.Any]) -> str:
         lines.append(f"{key}={options[key]}")
 
     _check_line("stanza", spec["stanza"])
-    lines += [
-        "",
-        f"[{spec['stanza']}]",
-        f"pg1-path={PG_DATA_DIR}",
-        f"pg1-socket-path={PG_SOCKET_DIR}",
-    ]
+    for stanza in (spec["stanza"], snapshot_stanza(spec["stanza"])):
+        lines += [
+            "",
+            f"[{stanza}]",
+            f"pg1-path={PG_DATA_DIR}",
+            f"pg1-socket-path={PG_SOCKET_DIR}",
+        ]
     return "\n".join(lines) + "\n"
+
+
+def snapshot_stanza(stanza: str) -> str:
+    """The stanza of the states kept before rollbacks, offline backups."""
+    return f"{stanza}-rollbacks"
 
 
 def repo_fingerprint(spec: dict[str, tp.Any]) -> str:
@@ -210,13 +219,30 @@ def remove_restore_state() -> bool:
     return files.remove(RESTORE_STATE_FILE)
 
 
-def restore_args(spec: dict[str, tp.Any], backup_set: str) -> list[str]:
-    """Return the restore arguments.
+def restore_args(
+    spec: dict[str, tp.Any], backup_set: str, in_place: bool = False
+) -> list[str]:
+    """Return the restore arguments, `in_place` for the cluster's own nodes.
 
     delta=y comes from the rendered config: only files that differ are
     fetched from the repository.
     """
     args = [f"--config={RESTORE_CONF_FILE}", f"--set={backup_set}"]
+    if spec.get("before_revision") is not None:
+        # A copy of the stopped cluster replays its own WAL only. The type is
+        # explicit: for an offline backup it defaults to none, which starts the
+        # server without a recovery and keeps the timeline of the copy.
+        args += ["--type=default", "--target-timeline=current"]
+        if in_place:
+            # The kept state has no archive, and the timeline history is in
+            # the cluster's: the promotion has to choose a timeline no
+            # rollback has used
+            args.append(
+                "--recovery-option=restore_command=pgbackrest "
+                f"--config={RESTORE_CONF_FILE} "
+                f'--stanza={spec["stanza"]} archive-get %f "%p"'
+            )
+        return [*args, "restore"]
     if spec["target_time"] is not None:
         args += [
             "--type=time",
@@ -334,6 +360,59 @@ def restore_backup_set(stanza: str, target_time: str | None) -> str:
             f"No backup to recover to {target_time or 'the end of the archive'} from"
         )
     return backup_set
+
+
+def find_snapshot(stanza: str, revision: str | int) -> str | None:
+    """Return the state kept before the rollback with the revision, if any."""
+    info = json.loads(
+        run(
+            snapshot_stanza(stanza),
+            f"--config={RESTORE_CONF_FILE}",
+            "--output=json",
+            "info",
+        )
+    )
+    labels = [
+        backup["label"]
+        for backup in (info[0].get("backup", []) if info else [])
+        if not backup.get("error")
+        and (backup.get("annotation") or {}).get(SNAPSHOT_ANNOTATION) == str(revision)
+    ]
+    return labels[-1] if labels else None
+
+
+def take_snapshot(stanza: str, revision: str) -> None:
+    """Back the stopped cluster up, incrementally, annotated with the revision."""
+    name = snapshot_stanza(stanza)
+    config = f"--config={RESTORE_CONF_FILE}"
+    run(name, config, "--no-online", "stanza-create")
+    # delta=y compares files by checksum: a restore resets their timestamps
+    run(
+        name,
+        config,
+        "--no-online",
+        "--type=incr",
+        f"--annotation={SNAPSHOT_ANNOTATION}={revision}",
+        "backup",
+        timeout=None,
+    )
+
+
+def restore_set(spec: dict[str, tp.Any]) -> tuple[str, str]:
+    """Return the stanza and the backup to restore the spec from."""
+    revision = spec.get("before_revision")
+    if revision is None:
+        return spec["stanza"], restore_backup_set(spec["stanza"], spec["target_time"])
+    label = find_snapshot(spec["stanza"], revision)
+    if label is None:
+        raise PgBackRestError(f"No state kept before rollback {revision}")
+    return snapshot_stanza(spec["stanza"]), label
+
+
+def describe_target(spec: dict[str, tp.Any]) -> str:
+    if spec.get("before_revision") is not None:
+        return f"the state before rollback {spec['before_revision']}"
+    return spec["target_time"] or "the end of the archive"
 
 
 def choose_backup_type(

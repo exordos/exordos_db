@@ -81,9 +81,10 @@ def _instance(monkeypatch, patroni, active_jobs=set):
     return instance
 
 
-def test_job_gone_without_a_result_fails_the_rollback(monkeypatch):
+@pytest.mark.parametrize("phase", [Phase.SAVING, Phase.RESTORING])
+def test_job_gone_without_a_result_fails_the_rollback(monkeypatch, phase):
     # E.g. the leader rebooted during the restore
-    rollback.save_state(SPEC, Phase.RESTORING, started=True)
+    rollback.save_state(SPEC, phase, started=True)
 
     assert _instance(monkeypatch, FakePatroni())._reconcile_rollback() is False
     assert rollback.load_state()["phase"] == "failed"
@@ -307,6 +308,70 @@ def test_superseded_job_doesnt_overwrite_the_newer_rollback(monkeypatch):
     assert rollback.load_state()["phase"] == "paused"
 
 
+class KeptStates:
+    def __init__(self, monkeypatch, tmp_path, kept=None, cluster_state="shut down"):
+        self.kept = kept
+        self.taken = []
+        self.commands = []
+        monkeypatch.setattr(pg_rollback.pgbackrest, "PG_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            pg_rollback.pgbackrest, "find_snapshot", lambda stanza, rev: self.kept
+        )
+        monkeypatch.setattr(pg_rollback.pgbackrest, "take_snapshot", self._take)
+        monkeypatch.setattr(pg_rollback, "_cluster_state", lambda: cluster_state)
+        monkeypatch.setattr(
+            pg_rollback, "_as_postgres", lambda *cmd, **kw: self.commands.append(cmd)
+        )
+        monkeypatch.setattr(
+            pg_rollback.rollback,
+            "stop_postgres",
+            lambda: self.commands.append(("stop",)),
+        )
+
+    def _take(self, stanza, revision):
+        assert rollback.load_state()["phase"] == "saving"
+        self.taken.append((stanza, revision))
+
+
+def test_state_before_the_rollback_is_kept(monkeypatch, tmp_path):
+    rollback.save_state(SPEC, Phase.RESTORING, started=True)
+    states = KeptStates(monkeypatch, tmp_path)
+
+    pg_rollback._keep_the_current_state(SPEC)
+
+    assert states.taken == [(SPEC["stanza"], "1")]
+    assert rollback.load_state()["phase"] == "restoring"
+    assert rollback.load_state()["started"] is True
+    assert states.commands == []
+
+
+@pytest.mark.parametrize("leftover", [None, *pg_rollback.RESTORE_LEFTOVERS])
+def test_state_isnt_kept_again_or_from_an_unfinished_restore(
+    monkeypatch, tmp_path, leftover
+):
+    # Kept by an earlier attempt, or the data of a rollback that failed after
+    # its restore had started, whose own copy is the last state
+    rollback.save_state(SPEC, Phase.RESTORING, started=True)
+    if leftover:
+        (tmp_path / leftover).write_text("")
+    states = KeptStates(monkeypatch, tmp_path, kept=None if leftover else "F1")
+
+    pg_rollback._keep_the_current_state(SPEC)
+
+    assert states.taken == []
+
+
+def test_crashed_server_recovers_before_it_is_kept(monkeypatch, tmp_path):
+    # An offline backup of it would lose what's after its last checkpoint
+    rollback.save_state(SPEC, Phase.RESTORING, started=True)
+    states = KeptStates(monkeypatch, tmp_path, cluster_state="in production")
+
+    pg_rollback._keep_the_current_state(SPEC)
+
+    assert [c[-1] for c in states.commands] == ["start", "stop"]
+    assert states.taken == [(SPEC["stanza"], "1")]
+
+
 def test_job_doesnt_log_the_credentials(monkeypatch, caplog):
     rollback.save_state(SPEC, Phase.FAILED)
 
@@ -433,3 +498,47 @@ def test_bootstrap_state_goes_on_a_replica_of_another_leader(
 
     assert instance._bootstrap_state() is None
     assert not bootstrap_state.exists()
+
+
+class TestWaitForPromotion:
+    @pytest.fixture
+    def server(self, monkeypatch):
+        """A server whose states and pg_ctl status codes come from lists."""
+        server = types.SimpleNamespace(states=[], codes=[], now=0.0)
+        monkeypatch.setattr(pg_rollback, "_cluster_state", lambda: server.states.pop(0))
+        monkeypatch.setattr(
+            pg_rollback,
+            "_as_postgres",
+            lambda *cmd, **kw: types.SimpleNamespace(returncode=server.codes.pop(0)),
+        )
+        monkeypatch.setattr(pg_rollback.time, "monotonic", lambda: server.now)
+
+        def sleep(seconds):
+            server.now += seconds
+
+        monkeypatch.setattr(pg_rollback.time, "sleep", sleep)
+        return server
+
+    def test_server_not_started_yet_isnt_taken_for_stopped(self, server):
+        # A restored copy needs no WAL replay and is promoted within a second,
+        # but pg_ctl -W returns before the server writes its pid file
+        server.states = ["shut down", "shut down", "in production"]
+        server.codes = [3, 0]
+
+        pg_rollback._wait_for_promotion()
+
+    def test_server_stopped_during_the_recovery(self, server):
+        server.states = ["in archive recovery", "shut down"]
+        server.codes = [0, 3]
+
+        with pytest.raises(RuntimeError, match="stopped during the recovery"):
+            pg_rollback._wait_for_promotion()
+
+    def test_server_that_never_starts(self, server):
+        server.states = ["shut down"] * 20
+        server.codes = [3] * 20
+
+        with pytest.raises(RuntimeError, match="stopped during the recovery"):
+            pg_rollback._wait_for_promotion()
+
+        assert server.now > pg_rollback.START_TIMEOUT

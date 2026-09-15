@@ -155,6 +155,9 @@ class TestConfig:
             "\n[1b1bc0de-0000-4000-8000-000000000001]\n"
             "pg1-path=/var/lib/postgresql/patroni/data\n"
             "pg1-socket-path=/var/run/postgresql\n"
+            "\n[1b1bc0de-0000-4000-8000-000000000001-rollbacks]\n"
+            "pg1-path=/var/lib/postgresql/patroni/data\n"
+            "pg1-socket-path=/var/run/postgresql\n"
         )
 
     def test_spec_overrides_fixed_options(self):
@@ -219,6 +222,10 @@ def _restore_source(**kwargs):
     return backups.RESTORE_SOURCE_TYPE.from_simple_type(view)
 
 
+def _before_revision(revision):
+    return {"kind": "before_revision", "revision": revision}
+
+
 class TestS3RestoreSource:
     @pytest.mark.parametrize("target", [{}, {"target": {"kind": "latest"}}])
     def test_latest(self, target):
@@ -227,6 +234,7 @@ class TestS3RestoreSource:
 
         assert spec["stanza"] == SOURCE_UUID
         assert spec["target_time"] is None
+        assert spec["before_revision"] is None
         assert spec["options"]["repo1-s3-endpoint"] == "http://10.20.0.30:9000"
         assert spec["options"]["repo1-cipher-pass"] == "k3y"
         # Retention is a matter of the instance taking backups
@@ -248,7 +256,10 @@ class TestS3RestoreSource:
     @pytest.mark.parametrize(
         "target",
         [
-            # A target carries the fields of its kind and nothing else
+            # A target carries the fields of its kind and nothing else, so a
+            # time and a state before a rollback can't be asked for together
+            {"kind": "time", "time": "2026-01-14T10:30:15Z", "revision": 2},
+            {"kind": "before_revision", "revision": 2, "time": "2026-01-14T10:30:15Z"},
             {"kind": "latest", "time": "2026-01-14T10:30:15Z"},
             {"kind": "time"},
             {"kind": "whenever"},
@@ -257,6 +268,12 @@ class TestS3RestoreSource:
     def test_unknown_targets_are_rejected(self, target):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
             _restore_source(target=target)
+
+    def test_state_before_a_rollback(self):
+        source = _restore_source(target=_before_revision(2))
+        assert source.restore_spec()["before_revision"] == 2
+        other = _restore_source(target=_before_revision(3))
+        assert source.identity() != other.identity()
 
     def test_schedule_is_not_accepted(self):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
@@ -419,7 +436,84 @@ class TestRestoreBackupSet:
             pgbackrest.restore_backup_set(self.STANZA, "2026-09-14 15:11:00.000000+00")
 
 
+def _snapshot(label, revision, error=False):
+    backup = {"label": label, "error": error, "type": "incr"}
+    if revision is not None:
+        backup["annotation"] = {"exordos-before-revision": revision}
+    return backup
+
+
+class TestSnapshots:
+    STANZA = "84022dd1-a9db-41de-9490-9ab07976d5a2"
+
+    @pytest.fixture
+    def calls(self, monkeypatch):
+        calls = []
+        backups_listed = [
+            _snapshot("F1", "1"),
+            _snapshot("F1_I2", "2", error=True),
+            _snapshot("F1_I3", None),
+            # A retried job keeps the state again
+            _snapshot("F1_I4", "1"),
+        ]
+
+        def run(stanza, *args, timeout=600):
+            calls.append((stanza, args))
+            return json.dumps([{"backup": backups_listed}]) if "info" in args else ""
+
+        monkeypatch.setattr(pgbackrest, "run", run)
+        return calls
+
+    def test_newest_state_before_the_revision(self, calls):
+        assert pgbackrest.find_snapshot(self.STANZA, 1) == "F1_I4"
+        assert calls[0][0] == f"{self.STANZA}-rollbacks"
+
+    @pytest.mark.parametrize("revision", ["2", "3"])
+    def test_failed_or_missing_state_isnt_found(self, calls, revision):
+        assert pgbackrest.find_snapshot(self.STANZA, revision) is None
+        spec = {"stanza": self.STANZA, "target_time": None, "before_revision": revision}
+        with pytest.raises(pgbackrest.PgBackRestError):
+            pgbackrest.restore_set(spec)
+
+    def test_empty_stanza(self, monkeypatch):
+        monkeypatch.setattr(pgbackrest, "run", lambda *a, **kw: json.dumps([{}]))
+        assert pgbackrest.find_snapshot(self.STANZA, 1) is None
+
+    def test_state_is_restored_from_its_stanza(self, calls):
+        spec = {"stanza": self.STANZA, "target_time": None, "before_revision": 1}
+        assert pgbackrest.restore_set(spec) == (f"{self.STANZA}-rollbacks", "F1_I4")
+
+    def test_state_is_kept_offline_and_annotated(self, calls):
+        pgbackrest.take_snapshot(self.STANZA, "1")
+
+        config = "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf"
+        stanza = f"{self.STANZA}-rollbacks"
+        assert calls == [
+            (stanza, (config, "--no-online", "stanza-create")),
+            (
+                stanza,
+                (
+                    config,
+                    "--no-online",
+                    "--type=incr",
+                    "--annotation=exordos-before-revision=1",
+                    "backup",
+                ),
+            ),
+        ]
+
+
 class TestRestore:
+    def test_args_before_a_rollback(self):
+        spec = {"stanza": "s", "target_time": None, "before_revision": 2}
+        assert pgbackrest.restore_args(spec, "F1") == [
+            "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",
+            "--set=F1",
+            "--type=default",
+            "--target-timeline=current",
+            "restore",
+        ]
+
     def test_args_latest(self):
         assert pgbackrest.restore_args({"target_time": None}, "F1") == [
             "--config=/var/lib/postgresql/patroni/pgbackrest-restore.conf",

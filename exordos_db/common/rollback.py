@@ -33,8 +33,9 @@ lost the quorum demotes its leader. So the cluster is paused instead:
 1. the leader pauses the cluster;
 2. every replica stops its PostgreSQL (a paused Patroni leaves it stopped);
 3. once all replicas are stopped, the leader runs the rollback job: it stops
-   PostgreSQL, restores the backup with --delta, lets PostgreSQL recover to
-   the target and promote on its own, and leaves the promoted server running;
+   PostgreSQL, keeps a backup of the stopped server so the rollback can be
+   undone, restores the backup with --delta, lets PostgreSQL recover to the
+   target and promote on its own, and leaves the promoted server running;
 4. the paused Patroni takes the leader lock for the running primary (it
    removes the lock of a stopped server, and a node that isn't a primary
    never races while paused);
@@ -104,10 +105,16 @@ class Phase(str, enum.Enum):
     STOPPED = "stopped"
     # Leader
     PAUSED = "paused"
+    # Keeping the state before the rollback
+    SAVING = "saving"
     RESTORING = "restoring"
     RESTORED = "restored"
     RESUMED = "resumed"
     FAILED = "failed"
+
+
+# The phases the rollback job runs in
+JOB_PHASES = (Phase.SAVING, Phase.RESTORING)
 
 
 def load_marker() -> dict[str, tp.Any] | None:
@@ -260,8 +267,8 @@ def decide(
         if not job_active and all(m.get("state") == "stopped" for m in replicas):
             return Action.START_JOB
         return Action.WAIT
-    if phase is Phase.RESTORING:
-        # A cluster resumed during the restore would elect a leader
+    if phase in JOB_PHASES:
+        # A cluster resumed during the job would elect a leader
         return Action.WAIT if paused else Action.REPAUSE
     if phase is Phase.RESTORED:
         # Resume only once the paused Patroni has taken the leader lock for

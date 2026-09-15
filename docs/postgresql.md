@@ -220,7 +220,9 @@ the storage and the stanza.
     - `{"kind": "time", "time": "2026-09-14T10:30:00Z"}`: recover to that
       moment. A time in the future is rejected. It has to be covered by the
       archive: after the end of the oldest kept full backup and before the
-      last archived WAL.
+      last archived WAL;
+    - `{"kind": "before_revision", "revision": 1}`: the state kept before
+      rollback 1 (see [Undoing a Rollback](#undoing-a-rollback)).
 - `version` and `disk_size` must fit the backup: the same PostgreSQL major
   version and enough space for the data.
 - The new instance doesn't take backups unless its own `backup` is set. It
@@ -264,8 +266,9 @@ backups; only the data goes back to the target time.
   the same target rolls back to it again.
 - Other fields (e.g. rotated credentials) can change without a rollback. New
   credentials reach a rollback in progress too.
-- `target` has to be a `time`: the end of the archive is the state the
-  instance already has.
+- `target` has to be a `time` or a `before_revision` (see
+  [Undoing a Rollback](#undoing-a-rollback)): the end of the archive is the
+  state the instance already has.
 - `stanza` must be the instance's own uuid: another instance's backups have a
   different system identifier, restore those into a new instance.
 - Setting `restore_from` to `null` leaves the data as it is. It is rejected
@@ -275,10 +278,11 @@ backups; only the data goes back to the target time.
   roles are matched, which the leader alone decides, while a replica may
   still be rewinding to the new timeline and still needs the source.
 
-The leader restores only the files that differ from the target and
-recovers, and the replicas are rewound to the new timeline. The cluster is
-unavailable meanwhile and restarts once more, briefly, after it. The first
-backup after a rollback is always full.
+The leader keeps a copy of its data ([Undoing a Rollback](#undoing-a-rollback)),
+restores only the files that differ from the target and recovers, and the
+replicas are rewound to the new timeline. The cluster is unavailable
+meanwhile and restarts once more, briefly, after it. The first backup after a
+rollback is always full.
 
 - The instance has to have `backup` set to the repository of `restore_from`
   (the same endpoint, bucket and `path`; the keys may differ), since the
@@ -297,9 +301,9 @@ backup after a rollback is always full.
   rollback takes a full backup, so after a few rollbacks the earliest point
   to roll back to moves forward.
 - `restore_status` shows the `revision` being applied and the phase of the
-  leader (`paused`, `restoring`, `restored`, `resumed`), or `stopped` before
-  the leader reports and after it is done, until every replica replicates the
-  new timeline.
+  leader (`paused`, `saving`, `restoring`, `restored`, `resumed`), or
+  `stopped` before the leader reports and after it is done, until every
+  replica replicates the new timeline.
 - If the restore fails, the cluster stays paused and the instance is `ERROR`
   with the reason in `restore_status.error`; setting the source again with a
   higher `revision` starts the rollback over. `revision` has to be higher than
@@ -318,6 +322,26 @@ backup after a rollback is always full.
   rolled back.
 - A repository that fails (wrong keys, unreachable storage) doesn't stop users,
   databases and settings from being applied.
+
+### Undoing a Rollback
+
+Every rollback keeps the data the leader had right before it: an offline
+backup into the stanza `INSTANCE_UUID-rollbacks` of the same repository,
+annotated `exordos-before-revision` with the rollback's `revision`. Set
+`target` to `{"kind": "before_revision", "revision": N}` to restore it.
+
+- In place it is a rollback like any other: raise `revision`; the target's
+  `revision` must not be greater than the revisions used so far. A revision
+  whose rollback kept nothing fails the rollback like a `time` target without
+  a backup does. The undo keeps a copy too, so it can be undone.
+- A new instance can start from it too, even after the source is deleted.
+- The copy is incremental: the first rollback copies all the data while
+  `restore_status.phase` is `saving`, later ones only the changed files. If
+  the copy fails, the rollback fails with the data untouched.
+- A rollback that failed mid-restore keeps no copy; the one before it stays
+  the latest.
+- Copies aren't subject to `retention_full` and stay until removed from the
+  storage.
 
 ### Users and Databases of a Restored Cluster
 

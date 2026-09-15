@@ -156,9 +156,21 @@ class RestoreTime(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
             raise ValueError("target.time is in the future")
 
 
+class RestoreBeforeRevision(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """The state kept before rollback N."""
+
+    KIND = "before_revision"
+
+    revision = properties.property(
+        types.Integer(min_value=0, max_value=2**31 - 1),
+        required=True,
+    )
+
+
 RESTORE_TARGET_TYPE = types_dynamic.KindModelSelectorType(
     types_dynamic.KindModelType(RestoreLatest),
     types_dynamic.KindModelType(RestoreTime),
+    types_dynamic.KindModelType(RestoreBeforeRevision),
 )
 
 
@@ -180,20 +192,29 @@ class S3RestoreSource(S3Storage):
 
     def restore_spec(self) -> dict[str, tp.Any]:
         target_time = None
+        before_revision = None
         if isinstance(self.target, RestoreTime):
             target_time = self.target.time.astimezone(datetime.timezone.utc).strftime(
                 "%Y-%m-%d %H:%M:%S.%f+00"
             )
+        elif isinstance(self.target, RestoreBeforeRevision):
+            before_revision = self.target.revision
         return {
             "stanza": str(self.stanza),
             "options": self.storage_repo_options(),
             "target_time": target_time,
+            "before_revision": before_revision,
         }
 
-    def identity(self) -> tuple[str, str | None, int]:
+    def identity(self) -> tuple[str, str | None, int | None, int]:
         """What makes two sources restore the same data."""
         spec = self.restore_spec()
-        return (spec["stanza"], spec["target_time"], self.revision)
+        return (
+            spec["stanza"],
+            spec["target_time"],
+            spec["before_revision"],
+            self.revision,
+        )
 
 
 BACKUP_TYPE = types.AllowNone(
