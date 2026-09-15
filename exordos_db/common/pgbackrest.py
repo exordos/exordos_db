@@ -40,6 +40,7 @@ import subprocess
 import typing as tp
 
 from exordos_db.common import constants as cc
+from exordos_db.common import endpoints
 from exordos_db.common import files
 
 LOG = logging.getLogger(__name__)
@@ -57,6 +58,13 @@ RESTORE_CONF_FILE = f"{cc.PATRONI_DIR}/pgbackrest-restore.conf"
 RESTORE_STATE_FILE = f"{cc.PATRONI_DIR}/exordos_restore_state.json"
 # Errors reach the API, a pgBackRest error may be long
 ERROR_MAX_LENGTH = 1024
+# The backups the primary last found in the repository, written by the
+# backup timer and reported by the agent, see collect_catalog
+CATALOG_FILE = f"{cc.PATRONI_DIR}/exordos_backup_catalog.json"
+# Of a stanza, bounds what a node reports to the control plane
+CATALOG_MAX_BACKUPS = 500
+# Why the stanza can't be created, reported while it isn't
+STANZA_ERROR_FILE = f"{cc.WORK_DIR}/backup_stanza_error.txt"
 # Fingerprint of the repository the stanza was created in on this node
 STANZA_MARKER_FILE = f"{cc.WORK_DIR}/backup_stanza.sha256"
 
@@ -67,6 +75,9 @@ PG_SOCKET_DIR = "/var/run/postgresql"
 SNAPSHOT_ANNOTATION = "exordos-before-revision"
 
 DISABLED_ARCHIVE_COMMAND = ":"
+
+S3_ENDPOINT_OPTION = "repo1-s3-endpoint"
+VERIFY_TLS_OPTION = "repo1-storage-verify-tls"
 
 FIXED_GLOBAL_OPTIONS = {
     "archive-async": "y",
@@ -97,7 +108,14 @@ def _check_line(key: str, value: str) -> None:
 
 
 def render_config(spec: dict[str, tp.Any]) -> str:
-    options = {**FIXED_GLOBAL_OPTIONS, **spec["options"]}
+    """Render pgbackrest.conf, pinning the endpoint to a checked address.
+
+    The control plane checks the endpoint when the repository is saved, but
+    the name behind it can be pointed at a node's own address afterwards.
+    Whatever the name resolves to here is checked and passed as the host to
+    connect to, so the address can't change before the request.
+    """
+    options = {**FIXED_GLOBAL_OPTIONS, **spec["options"], **_endpoint_options(spec)}
     lines = ["[global]"]
     for key in sorted(options):
         _check_line(key, options[key])
@@ -114,6 +132,36 @@ def render_config(spec: dict[str, tp.Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _endpoint_options(spec: dict[str, tp.Any]) -> dict[str, str]:
+    """Pin the endpoint's name to an address checked here, where possible.
+
+    With TLS verified, the certificate is checked against the host connected
+    to, so pinning the address would reject every valid https endpoint. There
+    the name in the certificate is what ties the endpoint to its storage, and
+    a name pointed elsewhere fails the handshake instead.
+    """
+    options = spec["options"]
+    endpoint = options.get(S3_ENDPOINT_OPTION)
+    if endpoint is None:
+        return {}
+    try:
+        pinned = endpoints.pinned_address(endpoint)
+    except ValueError as e:
+        raise PgBackRestError(str(e)) from e
+
+    verified_tls = (
+        endpoint.startswith("https://") and options.get(VERIFY_TLS_OPTION, "y") != "n"
+    )
+    if pinned is None or verified_tls:
+        return {}
+    address, port = pinned
+    scheme = endpoint.split("://", 1)[0]
+    return {
+        "repo1-storage-host": f"{scheme}://{address}",
+        "repo1-storage-port": str(port),
+    }
+
+
 def snapshot_stanza(stanza: str) -> str:
     """The stanza of the states kept before rollbacks, offline backups."""
     return f"{stanza}-rollbacks"
@@ -125,7 +173,8 @@ def repo_fingerprint(spec: dict[str, tp.Any]) -> str:
     repo = {
         k: v
         for k, v in spec["options"].items()
-        if k.startswith("repo") and k != "repo1-retention-full"
+        if k.startswith("repo")
+        and k not in ("repo1-retention-full", "repo1-retention-full-type")
     }
     data = json.dumps({"stanza": spec["stanza"], "repo": repo}, sort_keys=True)
     return hashlib.sha256(data.encode()).hexdigest()
@@ -157,7 +206,16 @@ def stanza_ready(spec: dict[str, tp.Any]) -> bool:
     return marker is not None and marker.strip() == repo_fingerprint(spec)
 
 
+def save_stanza_error(error: BaseException | str) -> None:
+    files.write(STANZA_ERROR_FILE, error_text(error), group="root")
+
+
+def load_stanza_error() -> str | None:
+    return files.read(STANZA_ERROR_FILE)
+
+
 def mark_stanza_ready(spec: dict[str, tp.Any] | None) -> None:
+    files.remove(STANZA_ERROR_FILE)
     if spec is None:
         files.remove(STANZA_MARKER_FILE)
         return
@@ -310,20 +368,27 @@ def choose_backup_set(
             continue
         if target is not None and backup["timestamp"]["stop"] >= target:
             continue
-        timeline = int(backup["archive"]["start"][:8], 16)
-        latest, forks = timelines(backup)
-        if timeline >= latest or (
-            timeline in forks and _lsn(backup["lsn"]["stop"]) <= forks[timeline]
-        ):
+        if on_latest_history(backup, timelines):
             return backup["label"]
     return None
 
 
-def restore_backup_set(stanza: str, target_time: str | None) -> str:
-    """Choose the backup to restore with the restore config."""
-    config = f"--config={RESTORE_CONF_FILE}"
-    info = json.loads(run(stanza, config, "--output=json", "info"))
-    stanza_info = info[0] if info else {}
+def on_latest_history(
+    backup: dict[str, tp.Any],
+    timelines: tp.Callable[[dict[str, tp.Any]], Timelines],
+) -> bool:
+    """Whether a recovery following the latest timeline can start from it."""
+    timeline = int(backup["archive"]["start"][:8], 16)
+    latest, forks = timelines(backup)
+    return timeline >= latest or (
+        timeline in forks and _lsn(backup["lsn"]["stop"]) <= forks[timeline]
+    )
+
+
+def timelines_loader(
+    stanza: str, stanza_info: dict[str, tp.Any], *config: str
+) -> tp.Callable[[dict[str, tp.Any]], Timelines]:
+    """Return the timelines of the archive a backup is in, read once each."""
     archive_ids = {a["database"]["id"]: a["id"] for a in stanza_info.get("archive", [])}
     loaded: dict[str, Timelines] = {}
 
@@ -334,7 +399,7 @@ def restore_backup_set(stanza: str, target_time: str | None) -> str:
             listed = json.loads(
                 run(
                     stanza,
-                    config,
+                    *config,
                     "--output=json",
                     "--filter=\\.history$",
                     "repo-ls",
@@ -347,19 +412,116 @@ def restore_backup_set(stanza: str, target_time: str | None) -> str:
             else:
                 latest = histories[-1]
                 content = run(
-                    stanza, config, "repo-get", f"{path}/{latest:08X}.history"
+                    stanza, *config, "repo-get", f"{path}/{latest:08X}.history"
                 )
                 loaded[archive_id] = Timelines(latest, parse_history(content))
         return loaded[archive_id]
 
+    return timelines
+
+
+def restore_backup_set(stanza: str, target_time: str | None) -> str:
+    """Choose the backup to restore with the restore config."""
+    config = f"--config={RESTORE_CONF_FILE}"
+    info = json.loads(run(stanza, config, "--output=json", "info"))
+    stanza_info = info[0] if info else {}
+
     backup_set = choose_backup_set(
-        stanza_info.get("backup", []), target_time, timelines
+        stanza_info.get("backup", []),
+        target_time,
+        timelines_loader(stanza, stanza_info, config),
     )
     if backup_set is None:
         raise PgBackRestError(
             f"No backup to recover to {target_time or 'the end of the archive'} from"
         )
     return backup_set
+
+
+def _catalog_entry(backup: dict[str, tp.Any], restorable: bool) -> dict[str, tp.Any]:
+    annotation = str((backup.get("annotation") or {}).get(SNAPSHOT_ANNOTATION, ""))
+    info = backup.get("info") or {}
+    return {
+        "label": backup["label"],
+        "type": backup["type"],
+        "started_at": backup["timestamp"]["start"],
+        "finished_at": backup["timestamp"]["stop"],
+        "size": info.get("size", 0),
+        "stored_size": (info.get("repository") or {}).get("size", 0),
+        "before_revision": int(annotation) if annotation.isdigit() else None,
+        "error": bool(backup.get("error")),
+        "restorable": restorable,
+    }
+
+
+def catalog_backups(
+    stanza: str, stanza_info: dict[str, tp.Any], snapshots: bool = False
+) -> list[dict[str, tp.Any]]:
+    """Describe the backups of a stanza, the newest CATALOG_MAX_BACKUPS."""
+    backups = sorted(
+        stanza_info.get("backup", []), key=lambda b: b["timestamp"]["stop"]
+    )
+    backups = backups[-CATALOG_MAX_BACKUPS:]
+    timelines = timelines_loader(stanza, stanza_info)
+    entries = []
+    for backup in backups:
+        # A copy kept before a rollback replays its own WAL only
+        restorable = not backup.get("error") and (
+            snapshots or on_latest_history(backup, timelines)
+        )
+        entries.append(_catalog_entry(backup, restorable))
+    return entries
+
+
+def collect_catalog(
+    spec: dict[str, tp.Any],
+    stanza_info: dict[str, tp.Any] | None,
+    now: float,
+    error: str | None = None,
+    archive: dict[str, tp.Any] | None = None,
+) -> dict[str, tp.Any]:
+    """Describe the backups of the spec's stanzas for the control plane.
+
+    `stanza_info` is the info of the spec's stanza, already read, None when
+    it couldn't be. A stanza whose backups can't be read is left out rather
+    than reported empty, so the control plane doesn't forget its backups.
+    `error` is what failed in the run of the backup timer, `archive` the
+    state of WAL archiving.
+    """
+    stanza = spec["stanza"]
+    backups = {}
+    if stanza_info is not None:
+        snapshots = snapshot_stanza(stanza)
+        try:
+            backups[stanza] = catalog_backups(stanza, stanza_info)
+            info = json.loads(run(snapshots, "--output=json", "info"))
+            backups[snapshots] = catalog_backups(
+                snapshots, info[0] if info else {}, snapshots=True
+            )
+        except (PgBackRestError, subprocess.TimeoutExpired) as e:
+            LOG.error("Backups of %s can't be read: %s", stanza, e)
+            error = error or error_text(e)
+    return {
+        "repository": spec.get("repository"),
+        "stanza": stanza,
+        "collected_at": now,
+        "backups": backups,
+        "error": error,
+        "archive": archive,
+    }
+
+
+def save_catalog(catalog: dict[str, tp.Any]) -> None:
+    # Written by the backup timer running as postgres, no credentials in it
+    files.write_json(CATALOG_FILE, catalog)
+
+
+def remove_catalog() -> bool:
+    return files.remove(CATALOG_FILE)
+
+
+def load_catalog() -> dict[str, tp.Any] | None:
+    return files.read_json(CATALOG_FILE)
 
 
 def find_snapshot(stanza: str, revision: str | int) -> str | None:

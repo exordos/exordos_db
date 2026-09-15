@@ -28,6 +28,11 @@ PERMS_OWNER = [
     "exordos_db.user.update",
     "exordos_db.user.delete",
     "exordos_db.pg_version.read",
+    "exordos_db.backup_repository.create",
+    "exordos_db.backup_repository.read",
+    "exordos_db.backup_repository.update",
+    "exordos_db.backup_repository.delete",
+    "exordos_db.backup.read",
 ]
 
 ALL_PERMS = set(PERMS_OWNER)

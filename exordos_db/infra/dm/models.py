@@ -89,6 +89,16 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
 
         return config
 
+    def _restore_spec(self) -> dict[str, tp.Any]:
+        repository = self.get_source_repository()
+        if repository is None:
+            # Can't be deleted while the instance refers to it
+            raise ValueError(
+                f"Repository {self.restore_from.repository} of instance "
+                f"{self.uuid} not found"
+            )
+        return models.restore_spec(self.restore_from, repository)
+
     def _create_restore_config(
         self, node_uuid: sys_uuid.UUID, project_id: sys_uuid.UUID
     ) -> sdk_models.Config:
@@ -101,7 +111,7 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
                 node=node_uuid,
             ),
             body=sdk_models.TextBodyConfig(
-                content=json.dumps(self.restore_from.restore_spec(), sort_keys=True),
+                content=json.dumps(self._restore_spec(), sort_keys=True),
             ),
             path=pgbackrest.RESTORE_SPEC_FILE,
             owner="postgres",

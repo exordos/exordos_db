@@ -27,13 +27,13 @@ INSTANCE = uuid.UUID("38fc8bbb-0826-4287-9651-9745df402ded")
 OTHER = uuid.UUID("7f1a7112-f649-4273-a7a6-8e9ac2c10dd7")
 
 
+REPOSITORY = uuid.UUID("5a0e2c1b-7d3f-4e8a-9b6c-1f2e3d4c5b6a")
+
+
 def _source(**kwargs):
     view = {
-        "kind": "s3",
-        "endpoint": "http://10.20.0.26:9000",
-        "bucket": "dbaas-backups",
-        "access_key": "backup",
-        "secret_key": "secret",
+        "kind": "repository",
+        "repository": str(REPOSITORY),
         "stanza": str(INSTANCE),
         "target": {"kind": "time", "time": "2026-09-14T10:27:41Z"},
         **kwargs,
@@ -45,8 +45,8 @@ def _before_revision(revision):
     return {"kind": "before_revision", "revision": revision}
 
 
-def _backup(**kwargs):
-    view = {
+def _repository(**kwargs):
+    storage = {
         "kind": "s3",
         "endpoint": "http://10.20.0.26:9000/",
         "bucket": "dbaas-backups",
@@ -54,22 +54,28 @@ def _backup(**kwargs):
         "secret_key": "writer-secret",
         **kwargs,
     }
-    return backups.BACKUP_TYPE.from_simple_type(view)
+    return models.PGBackupRepository(
+        name="backups",
+        project_id=uuid.uuid4(),
+        storage=backups.STORAGE_TYPE.from_simple_type(storage),
+    )
 
 
-BACKUP = _backup()
+BACKUP_REPOSITORY = _repository()
 
 
-def _rollback(old, new, applied=None, backup=BACKUP):
-    return models.rollback_for_update(INSTANCE, old, new, applied, backup)
+def _rollback(old, new, applied=None, backup=BACKUP_REPOSITORY, source=None):
+    source = backup if source is None else source
+    return models.rollback_for_update(INSTANCE, old, new, applied, backup, source)
 
 
-def _rendered(rollback_revision, source):
+def _rendered(rollback_revision, source, repository=BACKUP_REPOSITORY):
     """The spec the nodes get, as the builder renders it."""
     instance = types.SimpleNamespace(
         uuid=INSTANCE,
         rollback_revision=rollback_revision,
         restore_from=source,
+        get_source_repository=lambda: repository,
     )
     return builder.PGInstanceBuilder._get_rollback(None, instance)
 
@@ -78,7 +84,7 @@ def test_first_source_on_an_existing_instance_rolls_back():
     assert _rollback(None, _source()) == 0
 
 
-def test_the_spec_is_rendered_from_the_source():
+def test_the_spec_is_rendered_from_the_source_and_its_repository():
     spec = _rendered(0, _source())
 
     assert spec["id"] == "0"
@@ -90,7 +96,9 @@ def test_the_spec_is_rendered_from_the_source():
 def test_rotated_credentials_reach_a_rollback_in_progress():
     # Nothing of the spec is kept, so the nodes get the current credentials
     # and go on converging to the same rollback
-    spec = _rendered(0, _source(access_key="rotated", secret_key="rotated-secret"))
+    rotated = _repository(access_key="rotated", secret_key="rotated-secret")
+
+    spec = _rendered(0, _source(), repository=rotated)
 
     assert spec["id"] == "0"
     assert spec["options"]["repo1-s3-key"] == "rotated"
@@ -111,8 +119,8 @@ def test_same_target_again_with_higher_revision():
     assert _rollback(old, _source(revision=2), applied=1) == 2
 
 
-def test_rotated_credentials_do_nothing():
-    assert _rollback(_source(), _source(secret_key="rotated")) is None
+def test_another_repository_object_for_the_same_source_does_nothing():
+    assert _rollback(_source(), _source(repository=str(uuid.uuid4()))) is None
 
 
 def test_clearing_the_source_leaves_the_data():
@@ -202,9 +210,9 @@ def test_revision_below_an_applied_rollback_is_rejected():
     "backup",
     [
         None,
-        _backup(bucket="other-bucket"),
-        _backup(path="/other"),
-        _backup(endpoint="http://10.20.0.27:9000"),
+        _repository(bucket="other-bucket"),
+        _repository(path="/other"),
+        _repository(endpoint="http://10.20.0.27:9000"),
     ],
 )
 def test_rollback_from_where_backups_dont_go_is_rejected(backup):
@@ -212,12 +220,18 @@ def test_rollback_from_where_backups_dont_go_is_rejected(backup):
     # backups go to: recovering from another one ends before the target,
     # after the restore has replaced the data
     with pytest.raises(models.RestoreSourceError):
-        _rollback(None, _source(), backup=backup)
+        _rollback(None, _source(), backup=backup, source=BACKUP_REPOSITORY)
 
 
 def test_repository_credentials_may_differ():
     # E.g. a read-only key to restore with, a trailing slash in the endpoint
-    assert _rollback(None, _source()) == 0
+    reader = _repository(endpoint="http://10.20.0.26:9000", access_key="reader")
+
+    assert _rollback(None, _source(), source=reader) == 0
+    assert (
+        _rendered(0, _source(), repository=reader)["options"]["repo1-s3-key"]
+        == "reader"
+    )
 
 
 def test_another_instances_backups_are_rejected():

@@ -207,6 +207,8 @@ def test_repository_errors_dont_hold_up_the_rest(monkeypatch):
     monkeypatch.setattr(pg.pgbackrest, "stanza_ready", lambda spec: False)
     monkeypatch.setattr(pg.pgbackrest, "apply_spec", lambda spec: False)
     monkeypatch.setattr(pg.pgbackrest, "remove_restore_config", lambda: False)
+    errors = []
+    monkeypatch.setattr(pg.pgbackrest, "save_stanza_error", errors.append)
     monkeypatch.setattr(
         pg.PGInstance, "_reconcile_target_users", lambda s: applied.append("users")
     )
@@ -231,6 +233,47 @@ def test_repository_errors_dont_hold_up_the_rest(monkeypatch):
 
     assert applied == ["users", "databases"]
     assert patroni.patches[-1]["synchronous_node_count"] == 0
+    # Reported through the API
+    assert [str(e) for e in errors] == ["stanza-create failed"]
+
+
+def test_an_endpoint_that_cant_be_rendered_doesnt_hold_up_the_rest(monkeypatch):
+    # The name behind the endpoint stopped resolving, or resolves to the node
+    backup = {"stanza": "s", "options": {}, "schedule": {}}
+    applied = []
+
+    def failing_apply(spec):
+        raise pg.pgbackrest.PgBackRestError("endpoint host s3 can't be resolved")
+
+    monkeypatch.setattr(pg.pgbackrest, "apply_spec", failing_apply)
+    monkeypatch.setattr(pg.pgbackrest, "stanza_ready", lambda spec: True)
+    monkeypatch.setattr(pg.pgbackrest, "remove_restore_config", lambda: False)
+    errors = []
+    monkeypatch.setattr(pg.pgbackrest, "save_stanza_error", errors.append)
+    monkeypatch.setattr(
+        pg.PGInstance, "_reconcile_target_users", lambda s: applied.append("users")
+    )
+    monkeypatch.setattr(
+        pg.PGInstance,
+        "_reconcile_target_databases",
+        lambda s: applied.append("databases"),
+    )
+    instance = pg.PGInstance(
+        uuid=uuid.uuid4(),
+        name="with-backup",
+        nodes_number=1,
+        sync_replica_number=0,
+        backup=backup,
+        users={},
+        databases={},
+    )
+    instance.c = types.SimpleNamespace(pclient=FakePatroni())
+
+    instance.dump_to_dp()
+
+    assert applied == ["users", "databases"]
+    # Reported through the API
+    assert [str(e) for e in errors] == ["endpoint host s3 can't be resolved"]
 
 
 def test_node_that_missed_the_rollback_doesnt_repeat_it(monkeypatch):

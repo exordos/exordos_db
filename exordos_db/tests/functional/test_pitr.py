@@ -72,7 +72,12 @@ def test_backups_are_taken(scenario, instances, s3_storage):
     source = instances(
         "pitr-src",
         nodes=2,
-        backup={**s3_storage, "incr_interval_hours": 1},
+        backup={
+            **s3_storage,
+            "incr_interval_hours": 1,
+            # The scenario relies on full backups expiring after rollbacks
+            "retention": {"kind": "full_backups", "count": 2},
+        },
     )
     app = source.create_user("app_user", APP_PASSWORD)
     scenario["appdb"] = source.create_database("appdb", app)
@@ -92,6 +97,47 @@ def test_backups_are_taken(scenario, instances, s3_storage):
     assert [b["type"] for b in backups if not b.get("error")] == ["full"]
     assert source.sql("select failed_count from pg_stat_archiver") == "0"
     scenario["source"] = source
+
+
+def _listed(cluster, expected_labels):
+    """Wait for the API to show exactly the backups with the labels."""
+
+    def listed():
+        rows = cluster.backup_rows()
+        return rows if {r["label"] for r in rows} == set(expected_labels) else None
+
+    return fc.wait_for(listed, f"backups {sorted(expected_labels)} of {cluster.uuid}")
+
+
+def test_backups_are_listed(scenario, s3_storage):
+    _require(scenario, "source")
+    source = scenario["source"]
+    [backup] = source.backups()
+
+    [row] = _listed(source, [backup["label"]])
+
+    assert row["type"] == "full"
+    assert row["stanza"] == source.uuid
+    assert row["repository"].endswith(s3_storage["repository"])
+    assert row["instance"].endswith(source.uuid)
+    assert row["restorable"] is True
+    assert row["error"] is False
+    # The API leaves out fields that are null
+    assert row.get("before_revision") is None
+    assert row["size"] > 0
+    assert row["finished_at"] >= row["started_at"]
+
+    def status():
+        instance = source.instance()
+        status = instance.get("backup_status") or {}
+        return status.get("restore_window") and status["last_backup_at"] and instance
+
+    instance = fc.wait_for(status, "the backup status of the instance")
+    status = instance["backup_status"]
+    assert status["last_backup_at"] == row["finished_at"]
+    assert status.get("error") is None
+    assert status["restore_window"]["earliest"] > row["finished_at"]
+    assert status["restore_window"]["latest"] >= row["finished_at"]
 
 
 def test_points_in_time(scenario):
@@ -173,20 +219,41 @@ def test_clone_to_the_end_of_the_archive(scenario, instances, s3_storage):
     assert clone.instance().get("restore_status") is None
 
 
-def test_clone_without_a_backup_fails(scenario, instances, s3_storage):
+def test_clone_without_a_backup_is_rejected(scenario, api, pg_version, s3_storage):
     _require(scenario, "points")
-    clone = instances(
-        "pitr-nobackup",
-        restore_from=_source(
+    body = {
+        "name": f"pitr-nobackup-{sys_uuid.uuid4().hex[:6]}",
+        "project_id": fc.PROJECT_ID,
+        "cpu": 1,
+        "ram": 2048,
+        "disk_size": 15,
+        "nodes_number": 1,
+        "sync_replica_number": 0,
+        "version": f"/v1/types/postgres/versions/{pg_version}",
+        "restore_from": _source(
             scenario, s3_storage, target=_at(scenario["before_backups"])
         ),
+    }
+
+    response = api.call("POST", fc.INSTANCES, body)
+
+    assert response.status_code == 400, response.text
+    assert "no backup" in response.text
+
+
+def test_clone_without_a_kept_state_fails(scenario, instances, s3_storage):
+    # Not known to the control plane: the data plane finds out
+    _require(scenario, "points")
+    clone = instances(
+        "pitr-nostate",
+        restore_from=_source(scenario, s3_storage, target=_before(0)),
     )
 
     clone.wait_status("ERROR")
 
     status = clone.instance().get("restore_status")
     assert status["revision"] is None
-    assert "No backup" in status["error"], status
+    assert "No state kept" in status["error"], status
 
 
 @pytest.mark.parametrize(
@@ -197,13 +264,22 @@ def test_clone_without_a_backup_fails(scenario, instances, s3_storage):
         # The end of the archive is the state the instance already has
         {"target": {"kind": "latest"}},
         {"target": {"kind": "time", "time": "2999-01-01T00:00:00Z"}},
+        # Before the first backup, known from the list
+        "before backups",
         # Backups go elsewhere: the latest WAL isn't there
-        {"path": "/functional-elsewhere"},
+        "elsewhere",
+        {"repository": str(sys_uuid.uuid4())},
     ],
 )
-def test_invalid_rollback_is_rejected(scenario, s3_storage, change):
+def test_invalid_rollback_is_rejected(
+    scenario, s3_storage, backup_repositories, change
+):
     _require(scenario, "points")
     source = scenario["source"]
+    if change == "before backups":
+        change = {"target": _at(scenario["before_backups"])}
+    if change == "elsewhere":
+        change = {"repository": backup_repositories(path="/functional-elsewhere")}
     restore_from = _source(scenario, s3_storage, target=_at(scenario["t1"]), revision=1)
 
     response = source.api.call(
@@ -260,6 +336,24 @@ def test_rollback_in_place(scenario, s3_storage):
     source.backup_now()
     assert source.backups()[-1]["type"] == "full"
     scenario["rolled_back"] = body
+
+
+def test_state_kept_before_a_rollback_is_listed(scenario):
+    _require(scenario, "rolled_back")
+    source = scenario["source"]
+    snapshots = f"{source.uuid}-rollbacks"
+    labels = [b["label"] for b in source.backups()]
+    [kept] = source.backups(snapshots)
+
+    rows = {r["label"]: r for r in _listed(source, [*labels, kept["label"]])}
+
+    assert rows[kept["label"]]["stanza"] == snapshots
+    assert rows[kept["label"]]["before_revision"] == 1
+    assert rows[kept["label"]]["restorable"] is True
+    # The first backup was taken before the target, the one after the
+    # rollback on the new timeline: a recovery can start from either
+    assert rows[labels[0]]["restorable"] is True
+    assert rows[labels[-1]]["restorable"] is True
 
 
 def test_same_source_again_does_nothing(scenario):
@@ -409,15 +503,16 @@ def test_failed_rollback_is_recovered_by_a_higher_revision(scenario, s3_storage)
     scenario["undone"] = source.now()
     time.sleep(2)
 
-    # No backup covers the target, the job fails before touching the data
-    _rollback(scenario, s3_storage, scenario["before_backups"], revision=5)
+    # No state was kept before revision 0, the job fails before touching the
+    # data. A target no backup covers is rejected by the API right away.
+    _undo(scenario, s3_storage, before_revision=0, revision=5)
     fc.wait_for(
         lambda: source.rollback_phase(leader) == "failed", "the rollback to fail"
     )
     source.wait_status("ERROR")
     status = source.instance().get("restore_status")
     assert status["revision"] == 5
-    assert "No backup" in status["error"], status
+    assert "No state kept" in status["error"], status
     assert source.dcs().get("pause") is True
     # The data of the leader is intact: its PostgreSQL still runs
     assert source.sql("select count(*) from orders", "appdb", ip=leader) == "24"
@@ -550,16 +645,19 @@ def test_invalid_undo_is_rejected(scenario, s3_storage, change):
     assert response.status_code == 400, response.text
 
 
-def test_repository_errors_dont_hold_up_the_roles(scenario, s3_storage):
+def test_repository_errors_dont_hold_up_the_roles(scenario, backup_repositories):
     _require(scenario, "recovered")
     source = scenario["source"]
-    broken = {
-        **s3_storage,
-        "secret_key": "wrong-secret-key",
-        "path": "/functional-broken",
-    }
+    broken = backup_repositories(
+        secret_key="wrong-secret-key", path="/functional-broken"
+    )
 
-    source.api.call("PUT", source.path, {"backup": broken}, expect=200)
+    source.api.call(
+        "PUT",
+        source.path,
+        {"backup": {"kind": "repository", "repository": broken}},
+        expect=200,
+    )
     user = source.create_user("during_error", "during-error-pass-functional")
 
     fc.wait_for(
@@ -569,3 +667,39 @@ def test_repository_errors_dont_hold_up_the_roles(scenario, s3_storage):
         "the user to be created while the repository fails",
     )
     source.api.call("DELETE", f"{source.path}/users/{user}", expect=204)
+
+
+def test_backups_outlive_their_instance(api, instances, backup_repositories):
+    repository = backup_repositories(path=f"/functional-{sys_uuid.uuid4().hex[:6]}")
+    ref = {"kind": "repository", "repository": repository}
+    cluster = instances("pitr-deleted", backup=ref)
+    cluster.wait_status("ACTIVE")
+    cluster.wait_ready([])
+    cluster.backup_now()
+    [backup] = cluster.backups()
+    [row] = _listed(cluster, [backup["label"]])
+    path = f"{fc.REPOSITORIES}{repository}"
+
+    # The instance backs up to it
+    response = api.call("DELETE", path)
+    assert response.status_code == 409, response.text
+    storage = api.get(path)["storage"]
+    moved = {"storage": {**storage, "path": "/functional-moved"}}
+    response = api.call("PUT", path, moved)
+    assert response.status_code == 400, response.text
+    assert "can't be moved" in response.text
+
+    api.call("DELETE", cluster.path, expect=204)
+
+    row = fc.wait_for(
+        lambda: (
+            (r := api.get(f"{fc.BACKUPS}{row['uuid']}")).get("instance") is None and r
+        ),
+        "the backup to lose its instance",
+    )
+    assert row["label"] == backup["label"]
+    # Restored from by the stanza of the deleted instance
+    assert row["stanza"] == cluster.uuid
+
+    api.call("DELETE", path, expect=204)
+    assert api.call("GET", f"{fc.BACKUPS}{row['uuid']}").status_code == 404

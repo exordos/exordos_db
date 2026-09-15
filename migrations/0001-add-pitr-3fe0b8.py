@@ -37,7 +37,8 @@ ALTER TABLE postgres_instances
     ADD COLUMN restore_from JSONB,
     ADD COLUMN roles_imported BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN rollback_revision INT,
-    ADD COLUMN restore_status JSONB;
+    ADD COLUMN restore_status JSONB,
+    ADD COLUMN backup_status JSONB;
 """,
             # Users imported from a restored cluster have only a hash
             "ALTER TABLE postgres_users ALTER COLUMN password DROP NOT NULL;",
@@ -52,12 +53,63 @@ CREATE UNIQUE INDEX IF NOT EXISTS postgres_users_instance_name_idx
 CREATE UNIQUE INDEX IF NOT EXISTS postgres_databases_instance_name_idx
     ON postgres_databases (instance, name);
 """,
+            """\
+CREATE TABLE postgres_backup_repositories (
+    uuid UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    project_id UUID NOT NULL,
+    storage JSONB NOT NULL,
+    encryption_key TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+""",
+            """\
+CREATE INDEX IF NOT EXISTS postgres_backup_repositories_project_id_idx
+    ON postgres_backup_repositories (project_id);
+""",
+            # A backup outlives its instance, and is forgotten along with its
+            # repository
+            """\
+CREATE TABLE postgres_backups (
+    uuid UUID PRIMARY KEY,
+    project_id UUID NOT NULL,
+    repository UUID NOT NULL
+        REFERENCES postgres_backup_repositories(uuid) ON DELETE CASCADE,
+    instance UUID REFERENCES postgres_instances(uuid) ON DELETE SET NULL,
+    stanza VARCHAR(64) NOT NULL,
+    label VARCHAR(64) NOT NULL,
+    type VARCHAR(16) NOT NULL,
+    before_revision INT,
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP NOT NULL,
+    size BIGINT NOT NULL DEFAULT 0,
+    stored_size BIGINT NOT NULL DEFAULT 0,
+    restorable BOOLEAN NOT NULL DEFAULT TRUE,
+    error BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE (repository, stanza, label)
+);
+""",
+            """\
+CREATE INDEX IF NOT EXISTS postgres_backups_project_id_idx
+    ON postgres_backups (project_id);
+""",
+            """\
+CREATE INDEX IF NOT EXISTS postgres_backups_instance_idx
+    ON postgres_backups (instance);
+""",
         ]
 
         for expression in expressions:
             session.execute(expression)
 
     def downgrade(self, session):
+        self._delete_table_if_exists(session, "postgres_backups")
+        self._delete_table_if_exists(session, "postgres_backup_repositories")
+
         expressions = [
             "DROP INDEX IF EXISTS postgres_databases_instance_name_idx;",
             "DROP INDEX IF EXISTS postgres_users_instance_name_idx;",
@@ -65,6 +117,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS postgres_databases_instance_name_idx
             "ALTER TABLE postgres_users ALTER COLUMN password SET NOT NULL;",
             """\
 ALTER TABLE postgres_instances
+    DROP COLUMN IF EXISTS backup_status,
     DROP COLUMN IF EXISTS restore_status,
     DROP COLUMN IF EXISTS rollback_revision,
     DROP COLUMN IF EXISTS roles_imported,

@@ -71,6 +71,8 @@ POLL_TIMEOUT = int(os.environ.get("DBAAS_POLL_TIMEOUT", "1200"))
 POLL_INTERVAL = int(os.environ.get("DBAAS_POLL_INTERVAL", "5"))
 
 INSTANCES = "/v1/types/postgres/instances/"
+REPOSITORIES = "/v1/types/postgres/backup_repositories/"
+BACKUPS = "/v1/types/postgres/backups/"
 WORK_DIR = "/var/lib/exordos/exordos_db"
 
 
@@ -277,12 +279,19 @@ class Cluster:
     def backup_now(self) -> None:
         self.ssh(self.leader(), "sudo systemctl start exordos-db-pg-backup")
 
-    def backups(self) -> list[dict]:
+    def backups(self, stanza: str | None = None) -> list[dict]:
+        """The backups of a stanza of the instance as pgBackRest lists them."""
         out = self.ssh(
             self.leader(),
-            f"sudo -u postgres pgbackrest --stanza={self.uuid} --output=json info",
+            f"sudo -u postgres pgbackrest --stanza={stanza or self.uuid} "
+            "--output=json info",
         )
         return json.loads(out)[0].get("backup", [])
+
+    def backup_rows(self) -> list[dict]:
+        """The backups of the instance the API shows."""
+        # A relationship is filtered by its URI
+        return self.api.get(f"{BACKUPS}?instance={self.path}")
 
     def archive_now(self) -> None:
         """Switch the WAL segment and wait until it is archived."""
@@ -396,21 +405,53 @@ def pg_version(api: Api) -> str:
     return api.get("/v1/types/postgres/versions/")[0]["uuid"]
 
 
-@pytest.fixture(scope="session")
-def s3_storage() -> dict:
-    return {
-        "kind": "s3",
-        "endpoint": S3_ENDPOINT,
-        "bucket": S3_BUCKET,
-        "access_key": S3_ACCESS_KEY,
-        "secret_key": S3_SECRET_KEY,
-        # Every run gets its own key, the bucket may be shared
-        "encryption_key": f"functional-{sys_uuid.uuid4()}",
-    }
+@pytest.fixture(scope="module")
+def backup_repositories(api: Api):
+    """Create repositories in the bucket, deleting them when the module is done."""
+    created = []
+
+    def create(**storage) -> str:
+        body = {
+            "name": f"functional-{sys_uuid.uuid4().hex[:6]}",
+            "project_id": PROJECT_ID,
+            "storage": {
+                "kind": "s3",
+                "endpoint": S3_ENDPOINT,
+                "bucket": S3_BUCKET,
+                "access_key": S3_ACCESS_KEY,
+                "secret_key": S3_SECRET_KEY,
+                **storage,
+            },
+            # Every run gets its own key, the bucket may be shared
+            "encryption_key": f"functional-{sys_uuid.uuid4()}",
+        }
+        uuid = api.call("POST", REPOSITORIES, body, 201).json()["uuid"]
+        created.append(uuid)
+        return uuid
+
+    yield create
+
+    if KEEP_INSTANCES:
+        return
+    for uuid in created:
+        # The instances using it are deleted first
+        wait_for(
+            lambda uuid=uuid: (
+                api.call("DELETE", f"{REPOSITORIES}{uuid}").status_code in (204, 404)
+            ),
+            f"repository {uuid} to be deleted",
+            timeout=300,
+        )
 
 
 @pytest.fixture(scope="module")
-def instances(api: Api, pg_version: str):
+def s3_storage(backup_repositories) -> dict:
+    """A reference to the repository of the module, for backup and restore_from."""
+    return {"kind": "repository", "repository": backup_repositories()}
+
+
+@pytest.fixture(scope="module")
+def instances(api: Api, pg_version: str, backup_repositories):
     """Create instances, deleting them when the module is done."""
     created = []
 

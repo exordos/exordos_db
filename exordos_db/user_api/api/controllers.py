@@ -74,7 +74,41 @@ class PGInstanceController(
                 "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
                 "rollback_revision": {constants.ALL: field_p.Permissions.HIDDEN},
                 "restore_status": {constants.ALL: field_p.Permissions.RO},
+                "backup_status": {constants.ALL: field_p.Permissions.RO},
             },
+        ),
+    )
+
+
+class PGBackupRepositoryController(
+    iam_controllers.PolicyBasedController,
+    ra_controllers.BaseResourceControllerPaginated,
+):
+    __policy_service_name__ = "exordos_db"
+    __policy_name__ = "backup_repository"
+
+    __resource__ = ra_resources.ResourceByRAModel(
+        model_class=models.PGBackupRepository,
+        convert_underscore=False,
+        process_filters=True,
+    )
+
+
+class PGBackupController(
+    iam_controllers.PolicyBasedController,
+    ra_controllers.BaseResourceControllerPaginated,
+):
+    """Backups as the nodes report them, read-only."""
+
+    __policy_service_name__ = "exordos_db"
+    __policy_name__ = "backup"
+
+    __resource__ = ra_resources.ResourceByRAModel(
+        model_class=models.PGBackup,
+        convert_underscore=False,
+        process_filters=True,
+        fields_permissions=field_p.UniversalPermissions(
+            permission=field_p.Permissions.RO,
         ),
     )
 

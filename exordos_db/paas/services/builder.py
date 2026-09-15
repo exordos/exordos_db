@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
 import logging
 import typing as tp
 import uuid
@@ -23,6 +24,7 @@ from gcl_looper.services.oslo import base as oslo_base
 from gcl_sdk.agents.universal.dm import models as ua_models
 from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.paas.services import builder
+from restalchemy.dm import filters as dm_filters
 
 from exordos_db.common import rollback
 from exordos_db.paas.dm import models
@@ -77,6 +79,83 @@ def restore_status(
     }
 
 
+def backup_fields(entry: dict[str, tp.Any]) -> dict[str, tp.Any]:
+    """The fields of a backup row from an entry of a node's catalog."""
+
+    def utc(timestamp: float) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
+
+    return {
+        "type": entry["type"],
+        "before_revision": entry["before_revision"],
+        "started_at": utc(entry["started_at"]),
+        "finished_at": utc(entry["finished_at"]),
+        "size": entry["size"],
+        "stored_size": entry["stored_size"],
+        "restorable": entry["restorable"],
+        "error": entry["error"],
+    }
+
+
+def _iso(timestamp: float | None) -> str | None:
+    if timestamp is None:
+        return None
+    return datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def summarize_backups(
+    catalog: dict[str, tp.Any],
+    stanza: str,
+    status: dict[str, tp.Any] | None,
+) -> dict[str, tp.Any]:
+    """Sum a node's catalog up into the backup status.
+
+    When the backups of the stanza couldn't be read, what was known about
+    them before stays.
+    """
+    archive = catalog.get("archive") or {}
+    entries = catalog["backups"].get(stanza)
+    previous = status or {}
+    if entries is None:
+        last_backup_at = previous.get("last_backup_at")
+        known_window = previous.get("restore_window")
+        earliest = None if known_window is None else known_window["earliest"]
+    else:
+        done = [e["finished_at"] for e in entries if not e["error"]]
+        last_backup_at = _iso(max(done)) if done else None
+        restorable = [e["finished_at"] for e in entries if e["restorable"]]
+        # A target has to be past the second a backup finished in
+        earliest = _iso(min(restorable) + 1) if restorable else None
+
+    last_archived_at = _iso(archive.get("last_archived_at"))
+    if archive.get("last_archived_at") is None:
+        # Not known after a failover until the new primary archives
+        last_archived_at = previous.get("last_archived_at")
+    window = None
+    if earliest is not None:
+        # ISO strings of one format compare as the moments they are
+        latest = max(m for m in (last_archived_at, last_backup_at, earliest) if m)
+        window = {"earliest": earliest, "latest": latest}
+    return {
+        "error": catalog.get("error"),
+        "last_backup_at": last_backup_at,
+        "last_archived_at": last_archived_at,
+        "last_archive_failed_at": _iso(archive.get("last_failed_at")),
+        "restore_window": window,
+    }
+
+
+def update_backup_status(
+    instance: models.PGInstance,
+    status: dict[str, tp.Any] | None,
+) -> None:
+    if status != instance.backup_status:
+        instance.backup_status = status
+        instance.update(force=True)
+
+
 class PaaSBuilder(builder.PaaSBuilder):
     @classmethod
     def agent_uuid_by_node(cls, node_uuid: sys_uuid.UUID) -> sys_uuid.UUID:
@@ -124,13 +203,23 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         if instance.backup is None:
             return None
 
-        options = instance.backup.pgbackrest_repo_options()
+        repository = instance.get_backup_repository()
+        if repository is None:
+            # Can't be deleted while the instance refers to it
+            raise ValueError(
+                f"Repository {instance.backup.repository} of instance "
+                f"{instance.uuid} not found"
+            )
+        options = repository.pgbackrest_options()
+        options.update(instance.backup.retention.repo_options())
         # WAL lives on the data disk. When the repository is unreachable
         # pgBackRest drops WAL past this size instead of filling the disk,
         # which breaks PITR but keeps the database running.
         options["archive-push-queue-max"] = f"{max(1, instance.disk_size // 4)}GiB"
         return {
             "stanza": str(instance.uuid),
+            # Tells the backups reported by the nodes to belong to it
+            "repository": str(repository.uuid),
             "options": options,
             "schedule": {
                 "full_interval_hours": instance.backup.full_interval_hours,
@@ -141,14 +230,26 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
     def _get_rollback(self, instance: models.PGInstance) -> dict[str, tp.Any] | None:
         """Render the in-place rollback the nodes converge to, if any.
 
-        Rendered from the source as it is now, like the backup is, so new
-        credentials of the source reach a rollback in progress. Once the
-        source is cleared the rollback is done with and none is asked for any
-        more.
+        Rendered from the source and the repository as they are now, like the
+        backup is, so a rotation of the repository credentials reaches a
+        rollback in progress. The source can't be cleared until the rollback
+        is over, see user_models.check_restore_from_cleared; cleared after it
+        the rollback is done with and none is asked for any more.
         """
         if instance.rollback_revision is None or instance.restore_from is None:
             return None
-        return {"id": rollback_id(instance), **instance.restore_from.restore_spec()}
+
+        repository = instance.get_source_repository()
+        if repository is None:
+            # Can't be deleted while the instance refers to it
+            raise ValueError(
+                f"Repository {instance.restore_from.repository} of instance "
+                f"{instance.uuid} not found"
+            )
+        return {
+            "id": rollback_id(instance),
+            **user_models.restore_spec(instance.restore_from, repository),
+        }
 
     @staticmethod
     def _roles_managed(instance: models.PGInstance) -> bool:
@@ -247,6 +348,99 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             instance.restore_status = status
             instance.update(force=True)
 
+    @staticmethod
+    def _sync_backups(
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        """Keep the rows of the instance's backups as the primary reports them.
+
+        The stanzas of the instance in the place its backup goes to are
+        synced, rows of another repository object for the same place are
+        dropped as duplicates. Rows of another place stay as they were, as do
+        those of a stanza whose backups couldn't be read.
+        """
+        if instance.backup is None:
+            update_backup_status(instance, None)
+            return
+        catalogs = [
+            actual.backup_catalog
+            for actual in paas_collection.actuals()
+            if actual is not None
+            and actual.backup_catalog is not None
+            and actual.backup_catalog.get("repository")
+            == str(instance.backup.repository)
+            and actual.backup_catalog.get("stanza") == str(instance.uuid)
+        ]
+        if not catalogs:
+            return
+        # A former primary may still report what it saw
+        catalog = max(catalogs, key=lambda c: c["collected_at"])
+        repository = instance.get_backup_repository()
+        if repository is None:
+            return
+        collected_at = datetime.datetime.fromtimestamp(
+            catalog["collected_at"], datetime.timezone.utc
+        )
+
+        # The rows of the instance's stanzas under any repository object for
+        # the place: the ones of another object are duplicates
+        places = {r.uuid for r in repository.same_place()}
+        rows = {}
+        duplicates = []
+        for row in user_models.PGBackup.objects.get_all(
+            filters={
+                "repository": dm_filters.In(list(places)),
+                "stanza": dm_filters.In(list(catalog["backups"])),
+            }
+        ):
+            if row.repository.uuid == repository.uuid:
+                rows[(row.stanza, row.label)] = row
+            else:
+                duplicates.append(row)
+
+        created = updated = 0
+        for stanza, entries in catalog["backups"].items():
+            for entry in entries:
+                fields = backup_fields(entry)
+                row = rows.pop((stanza, entry["label"]), None)
+                if row is None:
+                    user_models.PGBackup(
+                        uuid=sys_uuid.uuid5(
+                            repository.uuid, f"{stanza}/{entry['label']}"
+                        ),
+                        project_id=instance.project_id,
+                        repository=repository,
+                        instance=instance,
+                        stanza=stanza,
+                        label=entry["label"],
+                        **fields,
+                    ).insert()
+                    created += 1
+                elif any(getattr(row, k) != v for k, v in fields.items()):
+                    for k, v in fields.items():
+                        setattr(row, k, v)
+                    row.update()
+                    updated += 1
+        # Expired by the retention or removed from the storage. One finished
+        # after the catalog was collected is newer than it, not gone.
+        gone = [
+            row for row in rows.values() if row.finished_at <= collected_at
+        ] + duplicates
+        for row in gone:
+            row.delete()
+        if created or updated or gone:
+            LOG.info(
+                "Backups of instance %s: %d new, %d changed, %d gone",
+                instance.uuid,
+                created,
+                updated,
+                len(gone),
+            )
+
+        status = summarize_backups(catalog, str(instance.uuid), instance.backup_status)
+        update_backup_status(instance, status)
+
     def actualize_paas_objects_source_data_plane(
         self,
         instance: models.PGInstance,
@@ -255,6 +449,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         self._update_restore_status(instance, paas_collection)
         if not self._roles_managed(instance):
             self._import_roles(instance, paas_collection)
+        self._sync_backups(instance, paas_collection)
         return super().actualize_paas_objects_source_data_plane(
             instance, paas_collection
         )

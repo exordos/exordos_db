@@ -23,11 +23,14 @@ import pytest
 from restalchemy.common import exceptions as ra_exc
 import yaml
 
+from exordos_db.common import endpoints
 from exordos_db.common import pgbackrest
 from exordos_db.infra.services import builder as infra_builder
 from exordos_db.user_api.dm import backups
+from exordos_db.user_api.dm import models
 
 HOUR = 3600
+REPOSITORY_UUID = uuid.UUID("5a0e2c1b-7d3f-4e8a-9b6c-1f2e3d4c5b6a")
 
 S3_VIEW = {
     "kind": "s3",
@@ -39,7 +42,17 @@ S3_VIEW = {
 
 
 def _s3(**kwargs):
-    return backups.BACKUP_TYPE.from_simple_type({**S3_VIEW, **kwargs})
+    return backups.STORAGE_TYPE.from_simple_type({**S3_VIEW, **kwargs})
+
+
+def _repository(encryption_key=None, **kwargs):
+    return models.PGBackupRepository(
+        uuid=REPOSITORY_UUID,
+        name="backups",
+        project_id=uuid.uuid4(),
+        storage=_s3(**kwargs),
+        encryption_key=encryption_key,
+    )
 
 
 def _spec(**options):
@@ -58,11 +71,9 @@ def _backup(backup_type, stop, error=False):
     }
 
 
-class TestS3Backup:
+class TestS3Storage:
     def test_defaults(self):
-        backup = _s3()
-
-        assert backup.pgbackrest_repo_options() == {
+        assert _s3().repo_options() == {
             "repo1-type": "s3",
             "repo1-s3-endpoint": "http://10.20.0.30:9000",
             "repo1-s3-bucket": "dbaas-backups",
@@ -72,29 +83,30 @@ class TestS3Backup:
             "repo1-s3-uri-style": "path",
             "repo1-storage-verify-tls": "y",
             "repo1-path": "/exordos_db",
-            "repo1-retention-full": "2",
         }
-        assert backup.full_interval_hours == 168
-        assert backup.incr_interval_hours == 24
 
     def test_encryption_and_trailing_slash(self):
-        options = _s3(
+        options = _repository(
             endpoint="https://s3.example.com/",
             encryption_key="k3y",
             verify_tls=False,
-        ).pgbackrest_repo_options()
+        ).pgbackrest_options()
 
         assert options["repo1-s3-endpoint"] == "https://s3.example.com"
         assert options["repo1-storage-verify-tls"] == "n"
         assert options["repo1-cipher-type"] == "aes-256-cbc"
         assert options["repo1-cipher-pass"] == "k3y"
 
-    def test_none_disables(self):
-        assert backups.BACKUP_TYPE.from_simple_type(None) is None
+    def test_location_ignores_credentials(self):
+        assert (
+            _s3(endpoint="http://10.20.0.30:9000/", access_key="other").location()
+            == _s3().location()
+        )
+        assert _s3(path="/other").location() != _s3().location()
 
     def test_roundtrip(self):
-        view = backups.BACKUP_TYPE.to_simple_type(_s3())
-        assert backups.BACKUP_TYPE.from_simple_type(view) == _s3()
+        view = backups.STORAGE_TYPE.to_simple_type(_s3())
+        assert backups.STORAGE_TYPE.from_simple_type(view) == _s3()
 
     @pytest.mark.parametrize(
         "field, value",
@@ -113,6 +125,13 @@ class TestS3Backup:
             ("endpoint", "http://169.254.169.254"),
             ("endpoint", "http://[::1]:9000"),
             ("endpoint", "http://0.0.0.0:9000"),
+            # Other forms of 127.0.0.1 the nodes take
+            ("endpoint", "http://127.1:9000"),
+            ("endpoint", "http://2130706433"),
+            ("endpoint", "http://0x7f.1"),
+            ("endpoint", "http://0177.0.0.1"),
+            ("endpoint", "http://[::ffff:127.0.0.1]"),
+            ("endpoint", "http://[::ffff:169.254.169.254]"),
             ("uri_style", "virtual"),
         ],
     )
@@ -130,15 +149,106 @@ class TestS3Backup:
         ],
     )
     def test_valid(self, field, value):
-        assert _s3(**{field: value}).storage_repo_options()
-
-    def test_restore_source_endpoint_is_checked(self):
-        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
-            _restore_source(endpoint="http://169.254.169.254")
+        assert _s3(**{field: value}).repo_options()
 
     @pytest.mark.parametrize("field", ["endpoint", "bucket", "access_key"])
     def test_required(self, field):
         view = {k: v for k, v in S3_VIEW.items() if k != field}
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            backups.STORAGE_TYPE.from_simple_type(view)
+
+
+class TestEndpointResolved:
+    @pytest.fixture
+    def resolve(self, monkeypatch):
+        names = {}
+
+        def getaddrinfo(host, port, proto=0):
+            if host not in names:
+                raise endpoints.socket.gaierror(host)
+            return [(None, None, proto, "", (a, 0)) for a in names[host]]
+
+        monkeypatch.setattr(endpoints.socket, "getaddrinfo", getaddrinfo)
+        return names
+
+    @pytest.mark.parametrize(
+        "addresses",
+        [
+            ["169.254.169.254"],
+            ["10.20.0.30", "127.0.0.1"],
+            ["fe80::1%eth0"],
+            ["::1"],
+        ],
+    )
+    def test_rejected(self, resolve, addresses):
+        resolve["s3.example.com"] = addresses
+
+        with pytest.raises(ValueError):
+            backups.check_endpoint_resolved("http://s3.example.com:9000")
+
+    def test_allowed(self, resolve):
+        resolve["s3.example.com"] = ["10.20.0.30", "2001:db8::1"]
+
+        backups.check_endpoint_resolved("https://s3.example.com")
+
+    def test_unresolved_is_left_to_the_nodes(self, resolve):
+        backups.check_endpoint_resolved("https://s3.internal")
+
+    def test_literal_isnt_resolved(self, resolve):
+        backups.check_endpoint_resolved("http://10.20.0.30:9000")
+
+
+class TestRepositoryBackup:
+    def test_defaults(self):
+        backup = backups.BACKUP_TYPE.from_simple_type(
+            {"kind": "repository", "repository": str(REPOSITORY_UUID)}
+        )
+
+        assert backup.repository == REPOSITORY_UUID
+        assert backup.full_interval_hours == 168
+        assert backup.incr_interval_hours == 24
+        assert backup.retention.repo_options() == {
+            "repo1-retention-full-type": "time",
+            "repo1-retention-full": "7",
+        }
+
+    def test_retention_by_full_backups(self):
+        backup = backups.BACKUP_TYPE.from_simple_type(
+            {
+                "kind": "repository",
+                "repository": str(REPOSITORY_UUID),
+                "retention": {"kind": "full_backups", "count": 3},
+            }
+        )
+
+        assert backup.retention.repo_options() == {
+            "repo1-retention-full-type": "count",
+            "repo1-retention-full": "3",
+        }
+
+    def test_none_disables(self):
+        assert backups.BACKUP_TYPE.from_simple_type(None) is None
+
+    @pytest.mark.parametrize(
+        "view",
+        [
+            {"kind": "repository"},
+            # The storage is described by a repository only
+            {"kind": "s3", "repository": str(REPOSITORY_UUID)},
+            {**S3_VIEW, "kind": "repository", "repository": str(REPOSITORY_UUID)},
+            {
+                "kind": "repository",
+                "repository": str(REPOSITORY_UUID),
+                "retention": {"kind": "days", "days": 0},
+            },
+            {
+                "kind": "repository",
+                "repository": str(REPOSITORY_UUID),
+                "retention_full": 2,
+            },
+        ],
+    )
+    def test_invalid(self, view):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
             backups.BACKUP_TYPE.from_simple_type(view)
 
@@ -168,6 +278,86 @@ class TestConfig:
     def test_render_rejects_line_breaks(self):
         with pytest.raises(ValueError):
             pgbackrest.render_config(_spec(**{"repo1-s3-key": "a\nb"}))
+
+    @pytest.fixture
+    def resolve(self, monkeypatch):
+        names = {}
+
+        def getaddrinfo(host, port, proto=0):
+            if host not in names:
+                raise endpoints.socket.gaierror(host)
+            return [(None, None, proto, "", (a, 0)) for a in names[host]]
+
+        monkeypatch.setattr(endpoints.socket, "getaddrinfo", getaddrinfo)
+        return names
+
+    def test_render_pins_the_endpoint_name(self, resolve):
+        resolve["s3.example.com"] = ["10.20.0.30"]
+        spec = _spec(**{"repo1-s3-endpoint": "http://s3.example.com:9000"})
+
+        config = pgbackrest.render_config(spec)
+
+        # The name is resolved and checked here, so it can't be pointed at the
+        # node itself between the check and the request
+        assert "repo1-storage-host=http://10.20.0.30\n" in config
+        assert "repo1-storage-port=9000\n" in config
+        assert "repo1-s3-endpoint=http://s3.example.com:9000\n" in config
+
+    def test_render_pins_the_port_of_the_scheme(self, resolve):
+        resolve["s3.example.com"] = ["10.20.0.30"]
+
+        config = pgbackrest.render_config(
+            _spec(**{"repo1-s3-endpoint": "http://s3.example.com"})
+        )
+
+        assert "repo1-storage-port=80\n" in config
+
+    def test_render_leaves_a_verified_tls_endpoint_to_its_certificate(self, resolve):
+        # pgBackRest checks the certificate against the host it connects to,
+        # so a pinned address would reject every valid https endpoint
+        resolve["s3.example.com"] = ["10.20.0.30"]
+
+        config = pgbackrest.render_config(
+            _spec(**{"repo1-s3-endpoint": "https://s3.example.com"})
+        )
+
+        assert "repo1-storage-host" not in config
+
+    def test_render_pins_https_without_tls_verification(self, resolve):
+        resolve["s3.example.com"] = ["10.20.0.30"]
+        spec = _spec(
+            **{
+                "repo1-s3-endpoint": "https://s3.example.com",
+                "repo1-storage-verify-tls": "n",
+            }
+        )
+
+        config = pgbackrest.render_config(spec)
+
+        assert "repo1-storage-host=https://10.20.0.30\n" in config
+        assert "repo1-storage-port=443\n" in config
+
+    def test_render_keeps_an_address_endpoint_as_it_is(self, resolve):
+        config = pgbackrest.render_config(
+            _spec(**{"repo1-s3-endpoint": "http://10.20.0.30:9000"})
+        )
+
+        assert "repo1-storage-host" not in config
+
+    @pytest.mark.parametrize("address", ["169.254.169.254", "127.0.0.1"])
+    def test_render_rejects_a_name_pointed_at_the_node(self, resolve, address):
+        # The endpoint passed the control plane and was repointed afterwards
+        resolve["s3.example.com"] = [address]
+        spec = _spec(**{"repo1-s3-endpoint": "http://s3.example.com:9000"})
+
+        with pytest.raises(pgbackrest.PgBackRestError):
+            pgbackrest.render_config(spec)
+
+    def test_render_rejects_an_unresolvable_endpoint(self, resolve):
+        spec = _spec(**{"repo1-s3-endpoint": "http://s3.example.com:9000"})
+
+        with pytest.raises(pgbackrest.PgBackRestError):
+            pgbackrest.render_config(spec)
 
     def test_apply_spec_keeps_credentials_for_postgres(self, tmp_path, monkeypatch):
         conf = tmp_path / "pgbackrest.conf"
@@ -203,7 +393,9 @@ class TestConfig:
         schedule = _spec()
         schedule["schedule"]["incr_interval_hours"] = 1
         # Changing it mustn't recreate the stanza against the repository
-        retention = _spec(**{"repo1-retention-full": "7"})
+        retention = _spec(
+            **{"repo1-retention-full": "7", "repo1-retention-full-type": "time"}
+        )
         assert pgbackrest.repo_fingerprint(queue) == base
         assert pgbackrest.repo_fingerprint(schedule) == base
         assert pgbackrest.repo_fingerprint(retention) == base
@@ -218,7 +410,12 @@ SOURCE_UUID = "1b1bc0de-0000-4000-8000-000000000001"
 
 
 def _restore_source(**kwargs):
-    view = {**S3_VIEW, "stanza": SOURCE_UUID, **kwargs}
+    view = {
+        "kind": "repository",
+        "repository": str(REPOSITORY_UUID),
+        "stanza": SOURCE_UUID,
+        **kwargs,
+    }
     return backups.RESTORE_SOURCE_TYPE.from_simple_type(view)
 
 
@@ -226,11 +423,13 @@ def _before_revision(revision):
     return {"kind": "before_revision", "revision": revision}
 
 
-class TestS3RestoreSource:
+class TestRestoreSource:
     @pytest.mark.parametrize("target", [{}, {"target": {"kind": "latest"}}])
     def test_latest(self, target):
         # The end of the archive is what a source without a target replays to
-        spec = _restore_source(encryption_key="k3y", **target).restore_spec()
+        spec = models.restore_spec(
+            _restore_source(**target), _repository(encryption_key="k3y")
+        )
 
         assert spec["stanza"] == SOURCE_UUID
         assert spec["target_time"] is None
@@ -244,7 +443,7 @@ class TestS3RestoreSource:
         source = _restore_source(
             target={"kind": "time", "time": "2026-01-14T13:30:15.000250+03:00"}
         )
-        assert source.restore_spec()["target_time"] == "2026-01-14 10:30:15.000250+00"
+        assert source.target_spec()["target_time"] == "2026-01-14 10:30:15.000250+00"
 
     def test_future_target_time(self):
         future = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
@@ -253,15 +452,20 @@ class TestS3RestoreSource:
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
             _restore_source(target={"kind": "time", "time": future.isoformat()})
 
+    def test_state_before_a_rollback(self):
+        source = _restore_source(target=_before_revision(2))
+        assert source.target_spec()["before_revision"] == 2
+        other = _restore_source(target=_before_revision(3))
+        assert source.identity() != other.identity()
+
     @pytest.mark.parametrize(
         "target",
         [
-            # A target carries the fields of its kind and nothing else, so a
-            # time and a state before a rollback can't be asked for together
+            # A target is of one kind, so a time and a state before a rollback
+            # can't be asked for together
             {"kind": "time", "time": "2026-01-14T10:30:15Z", "revision": 2},
             {"kind": "before_revision", "revision": 2, "time": "2026-01-14T10:30:15Z"},
             {"kind": "latest", "time": "2026-01-14T10:30:15Z"},
-            {"kind": "time"},
             {"kind": "whenever"},
         ],
     )
@@ -269,19 +473,23 @@ class TestS3RestoreSource:
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
             _restore_source(target=target)
 
-    def test_state_before_a_rollback(self):
-        source = _restore_source(target=_before_revision(2))
-        assert source.restore_spec()["before_revision"] == 2
-        other = _restore_source(target=_before_revision(3))
-        assert source.identity() != other.identity()
-
-    def test_schedule_is_not_accepted(self):
+    @pytest.mark.parametrize(
+        "field, value", [("retention_full", 2), ("secret_key", "secret")]
+    )
+    def test_unknown_fields_are_rejected(self, field, value):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
-            _restore_source(retention_full=2)
+            _restore_source(**{field: value})
 
-    def test_stanza_required(self):
+    @pytest.mark.parametrize("field", ["stanza", "repository"])
+    def test_required(self, field):
+        view = {
+            "kind": "repository",
+            "repository": str(REPOSITORY_UUID),
+            "stanza": SOURCE_UUID,
+        }
+        del view[field]
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
-            backups.RESTORE_SOURCE_TYPE.from_simple_type(S3_VIEW)
+            backups.RESTORE_SOURCE_TYPE.from_simple_type(view)
 
 
 def _repo_backup(label, timeline, lsn, stop, error=False, stop_lsn=None):

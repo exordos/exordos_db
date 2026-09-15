@@ -15,15 +15,15 @@
 #    under the License.
 
 import datetime
-import ipaddress
 import re
 import typing as tp
-import urllib.parse
 
 from restalchemy.dm import models
 from restalchemy.dm import properties
 from restalchemy.dm import types
 from restalchemy.dm import types_dynamic
+
+from exordos_db.common import endpoints
 
 
 class HttpEndpointType(types.BaseCompiledRegExpTypeFromAttr):
@@ -49,28 +49,30 @@ class RepoPathType(types.BaseCompiledRegExpTypeFromAttr):
 def check_endpoint_host(endpoint: str) -> None:
     """Reject endpoints on the nodes themselves or the metadata service.
 
-    The repository is reached from the nodes of the instance, and errors of
-    reaching it are reported through the API. Private addresses are allowed:
-    the storage is often in the same network.
+    A host name is checked by `check_endpoint_resolved`, since this check
+    runs on every read of the storage as well.
     """
-    host = urllib.parse.urlsplit(endpoint).hostname or ""
-    if host == "localhost" or host.endswith(".localhost"):
-        raise ValueError(f"endpoint host {host} is not allowed")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
+    endpoints.check_host(endpoint)
+
+
+def check_endpoint_resolved(endpoint: str) -> None:
+    """Reject a host name resolving to an address `check_endpoint_host` rejects.
+
+    The name is resolved on the control plane when the repository is saved.
+    One the control plane can't resolve is left to the nodes, whose resolver
+    may differ; the node checks the addresses it gets before it connects.
+    """
+    host = endpoints.host_of(endpoint)
+    if endpoints.literal_address(host) is not None:
         return
-    if (
-        address.is_loopback
-        or address.is_link_local
-        or address.is_unspecified
-        or address.is_multicast
-    ):
-        raise ValueError(f"endpoint address {host} is not allowed")
+    for address in endpoints.resolved_addresses(host) or []:
+        endpoints.check_address(host, address)
 
 
 class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
-    """A pgBackRest repository in S3."""
+    """Where a pgBackRest repository is in S3 and how to reach it."""
+
+    KIND = "s3"
 
     endpoint = properties.property(HttpEndpointType(), required=True)
     bucket = properties.property(BucketNameType(), required=True)
@@ -80,23 +82,17 @@ class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
     uri_style = properties.property(types.Enum(("path", "host")), default="path")
     verify_tls = properties.property(types.Boolean(), default=True)
     path = properties.property(RepoPathType(), default="/exordos_db")
-    # The repository is encrypted by pgBackRest when set. Losing the key
-    # makes the backups unrecoverable.
-    encryption_key = properties.property(
-        types.AllowNone(OptionValueType()),
-        default=None,
-    )
 
     def validate(self) -> None:
         check_endpoint_host(self.endpoint)
 
-    def repository(self) -> tuple[str, str, str]:
+    def location(self) -> tuple[str, ...]:
         """Where the repository is, regardless of the credentials to it."""
-        return (self.endpoint.rstrip("/"), self.bucket, self.path)
+        return (self.KIND, self.endpoint.rstrip("/"), self.bucket, self.path)
 
-    def storage_repo_options(self) -> dict[str, str]:
+    def repo_options(self) -> dict[str, str]:
         """Return pgBackRest `repo1-*` options to reach the repository."""
-        options = {
+        return {
             "repo1-type": "s3",
             "repo1-s3-endpoint": self.endpoint.rstrip("/"),
             "repo1-s3-bucket": self.bucket,
@@ -107,15 +103,55 @@ class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
             "repo1-storage-verify-tls": "y" if self.verify_tls else "n",
             "repo1-path": self.path,
         }
-        if self.encryption_key is not None:
-            options["repo1-cipher-type"] = "aes-256-cbc"
-            options["repo1-cipher-pass"] = self.encryption_key
-        return options
 
 
-class S3Backup(S3Storage):
-    KIND = "s3"
+STORAGE_TYPE = types_dynamic.KindModelSelectorType(
+    types_dynamic.KindModelType(S3Storage),
+)
 
+
+class RetentionDays(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """Keep what recovers to any moment of the last days."""
+
+    KIND = "days"
+
+    days = properties.property(types.Integer(min_value=1, max_value=3650), default=7)
+
+    def repo_options(self) -> dict[str, str]:
+        # pgBackRest keeps the newest full backup older than that too, so
+        # the whole period stays recoverable
+        return {
+            "repo1-retention-full-type": "time",
+            "repo1-retention-full": str(self.days),
+        }
+
+
+class RetentionFullBackups(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """Keep a number of full backups with their incremental ones."""
+
+    KIND = "full_backups"
+
+    count = properties.property(types.Integer(min_value=1, max_value=365), default=2)
+
+    def repo_options(self) -> dict[str, str]:
+        return {
+            "repo1-retention-full-type": "count",
+            "repo1-retention-full": str(self.count),
+        }
+
+
+RETENTION_TYPE = types_dynamic.KindModelSelectorType(
+    types_dynamic.KindModelType(RetentionDays),
+    types_dynamic.KindModelType(RetentionFullBackups),
+)
+
+
+class RepositoryBackup(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """Backups of an instance to a repository."""
+
+    KIND = "repository"
+
+    repository = properties.property(types.UUID(), required=True)
     full_interval_hours = properties.property(
         types.Integer(min_value=1, max_value=8784),
         default=168,
@@ -124,16 +160,7 @@ class S3Backup(S3Storage):
         types.Integer(min_value=1, max_value=8784),
         default=24,
     )
-    retention_full = properties.property(
-        types.Integer(min_value=1, max_value=365),
-        default=2,
-    )
-
-    def pgbackrest_repo_options(self) -> dict[str, str]:
-        return {
-            **self.storage_repo_options(),
-            "repo1-retention-full": str(self.retention_full),
-        }
+    retention = properties.property(RETENTION_TYPE, default=RetentionDays)
 
 
 class RestoreLatest(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
@@ -174,9 +201,12 @@ RESTORE_TARGET_TYPE = types_dynamic.KindModelSelectorType(
 )
 
 
-class S3RestoreSource(S3Storage):
-    KIND = "s3"
+class RepositoryRestoreSource(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """Backups of an instance, maybe a deleted one, in a repository."""
 
+    KIND = "repository"
+
+    repository = properties.property(types.UUID(), required=True)
     # Stanza of the backed up instance, i.e. its uuid. The instance itself
     # may be gone already.
     stanza = properties.property(types.UUID(), required=True)
@@ -190,7 +220,8 @@ class S3RestoreSource(S3Storage):
         default=0,
     )
 
-    def restore_spec(self) -> dict[str, tp.Any]:
+    def target_spec(self) -> dict[str, tp.Any]:
+        """What to restore, without the repository options."""
         target_time = None
         before_revision = None
         if isinstance(self.target, RestoreTime):
@@ -201,14 +232,13 @@ class S3RestoreSource(S3Storage):
             before_revision = self.target.revision
         return {
             "stanza": str(self.stanza),
-            "options": self.storage_repo_options(),
             "target_time": target_time,
             "before_revision": before_revision,
         }
 
     def identity(self) -> tuple[str, str | None, int | None, int]:
         """What makes two sources restore the same data."""
-        spec = self.restore_spec()
+        spec = self.target_spec()
         return (
             spec["stanza"],
             spec["target_time"],
@@ -219,12 +249,12 @@ class S3RestoreSource(S3Storage):
 
 BACKUP_TYPE = types.AllowNone(
     types_dynamic.KindModelSelectorType(
-        types_dynamic.KindModelType(S3Backup),
+        types_dynamic.KindModelType(RepositoryBackup),
     )
 )
 
 RESTORE_SOURCE_TYPE = types.AllowNone(
     types_dynamic.KindModelSelectorType(
-        types_dynamic.KindModelType(S3RestoreSource),
+        types_dynamic.KindModelType(RepositoryRestoreSource),
     )
 )

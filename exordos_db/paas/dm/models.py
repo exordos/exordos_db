@@ -58,6 +58,11 @@ class PGInstanceNode(
     restore_state = properties.property(
         ra_types.AllowNone(ra_types.Dict()), default=None
     )
+    # Reported by the primary, see pgbackrest.collect_catalog; not a target
+    # field
+    backup_catalog = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     @classmethod
     def get_resource_kind(cls) -> str:

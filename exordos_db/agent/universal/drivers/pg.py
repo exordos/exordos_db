@@ -181,6 +181,12 @@ class PGInstance(meta.MetaDataPlaneModel):
     restore_state = properties.property(
         ra_types.AllowNone(ra_types.Dict()), default=None
     )
+    # The backups in the repository as the backup timer of the primary last
+    # found them, see pgbackrest.collect_catalog. Not a target field, like
+    # found_roles.
+    backup_catalog = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     # The requested rollback is kept to know one is in progress while
     # PostgreSQL is down
@@ -369,6 +375,7 @@ WHERE d.datname not in """
             )
         except (pgbackrest.PgBackRestError, subprocess.TimeoutExpired) as e:
             LOG.error("Stanza %s can't be created: %s", self.backup["stanza"], e)
+            pgbackrest.save_stanza_error(e)
             return
         pgbackrest.mark_stanza_ready(self.backup)
         LOG.info("Stanza %s created", self.backup["stanza"])
@@ -386,6 +393,33 @@ WHERE d.datname not in """
             and not pgbackrest.stanza_ready(spec)
         )
         self.backup = spec if archiving and not stanza_missing else BACKUP_UNSETTLED
+        self.backup_catalog = self._backup_catalog(spec)
+
+    def _backup_catalog(
+        self, spec: dict[str, tp.Any] | None
+    ) -> dict[str, tp.Any] | None:
+        if spec is None or not self.c.pclient.is_primary(get_ttl_hash(seconds=20)):
+            return None
+        if not pgbackrest.stanza_ready(spec):
+            # Nothing is backed up until the stanza is created
+            return {
+                "repository": spec.get("repository"),
+                "stanza": spec["stanza"],
+                "collected_at": 0,
+                "backups": {},
+                "error": pgbackrest.load_stanza_error(),
+                "archive": None,
+            }
+        catalog = pgbackrest.load_catalog()
+        # One collected for another repository or instance, e.g. before the
+        # backups were moved elsewhere, would make the control plane forget
+        # the backups in this one
+        if catalog is None or (
+            catalog.get("repository") != spec.get("repository")
+            or catalog.get("stanza") != spec["stanza"]
+        ):
+            return None
+        return catalog
 
     def _start_rollback_job(self, rollback_id: str) -> None:
         unit = rollback.job_unit(rollback_id)
@@ -557,8 +591,14 @@ WHERE d.datname not in """
             self._reconcile_DCS()
 
         # Every node keeps the config, any of them may become the primary
-        if pgbackrest.apply_spec(self.backup):
-            LOG.info("Backup config updated")
+        try:
+            if pgbackrest.apply_spec(self.backup):
+                LOG.info("Backup config updated")
+        except pgbackrest.PgBackRestError as e:
+            # An endpoint that can't be resolved or points at the node itself
+            # mustn't hold the rest up; the config it had is left in place
+            LOG.error("Backup config can't be rendered: %s", e)
+            pgbackrest.save_stanza_error(e)
         if self.backup is None:
             pgbackrest.mark_stanza_ready(None)
 
@@ -578,20 +618,6 @@ WHERE d.datname not in """
             self._reconcile_target_users()
         if self.databases is not None:
             self._reconcile_target_databases()
-
-    @staticmethod
-    def _applied_rollback(spec: dict[str, tp.Any] | None) -> dict[str, tp.Any] | None:
-        """Report the requested rollback back once this node has applied it.
-
-        The node keeps the id only, so the spec itself has to come from the
-        target: reporting anything else would leave the resource with a hash
-        the target never matches. A node that hasn't applied it, or one with
-        a marker of an older rollback, reports none, and the agent applies
-        the target and reports that instead.
-        """
-        return (
-            spec if spec is not None and spec["id"] == rollback.applied_id() else None
-        )
 
     def _bootstrap_state(self) -> dict[str, tp.Any] | None:
         """Return the progress of the restore the cluster is bootstrapped with."""
@@ -639,6 +665,20 @@ WHERE d.datname not in """
             return self._report_state(spec["id"], state)
         bootstrap = self._bootstrap_state()
         return None if bootstrap is None else self._report_state(None, bootstrap)
+
+    @staticmethod
+    def _applied_rollback(spec: dict[str, tp.Any] | None) -> dict[str, tp.Any] | None:
+        """Report the requested rollback back once this node has applied it.
+
+        The node keeps the id only, so the spec itself has to come from the
+        target: reporting anything else would leave the resource with a hash
+        the target never matches. A node that hasn't applied it, or one with
+        a marker of an older rollback, reports none, and the agent applies
+        the target and reports that instead.
+        """
+        return (
+            spec if spec is not None and spec["id"] == rollback.applied_id() else None
+        )
 
     def restore_from_dp(self) -> None:
         # The rollback or the restore in progress is all there is to report,
