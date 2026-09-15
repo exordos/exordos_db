@@ -32,12 +32,17 @@ from restalchemy.dm import types as ra_types
 import yaml
 
 from exordos_db.common import constants
+from exordos_db.common import pgbackrest
 
 LOG = logging.getLogger(__name__)
 
 # NOTE: don't forget to update validation in controlplane
 PG_SYSTEM_USERS_REGEX_TMPL = "'^(pg_|dbaas_|postgres$)'"
 PG_SYSTEM_DATABASES_TMPL = "('postgres', 'template0', 'template1')"
+
+# Reported instead of the backup spec while the data plane hasn't converged
+# to it yet, so the agent keeps applying the spec
+BACKUP_UNSETTLED = {"state": "unsettled"}
 
 
 def get_ttl_hash(seconds=600):
@@ -87,8 +92,9 @@ class PatroniClient:
 
 class ClientsSingleton(singletons.InheritSingleton):
     def __init__(self):
-        self.reinit_pclient()
-        self.reinit_psql()
+        # Connect lazily: a model is built before PostgreSQL may be up
+        self._pclient = None
+        self._psql = None
 
     def reinit_pclient(self):
         self._pclient = PatroniClient()
@@ -101,11 +107,13 @@ class ClientsSingleton(singletons.InheritSingleton):
 
     @property
     def pclient(self):
+        if self._pclient is None:
+            self.reinit_pclient()
         return self._pclient
 
     @property
     def psql(self):
-        if self._psql.broken or self._psql.closed:
+        if self._psql is None or self._psql.broken or self._psql.closed:
             self.reinit_psql()
         return self._psql
 
@@ -125,8 +133,12 @@ class PGInstance(meta.MetaDataPlaneModel):
         ra_types.String(min_length=1, max_length=512),
         required=True,
     )
-    databases = properties.property(ra_types.Dict(), default={})
-    users = properties.property(ra_types.Dict(), default={})
+    # None leaves them unmanaged, e.g. until a restored cluster's are imported.
+    # The default has to be None too: restalchemy replaces a None value with
+    # the default, so any other default would turn "unmanaged" into "empty"
+    # and drop everything the cluster has.
+    databases = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    users = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
     nodes_number = properties.property(ra_types.Integer(min_value=1, max_value=16))
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
@@ -135,15 +147,32 @@ class PGInstance(meta.MetaDataPlaneModel):
         ra_types.Enum([s.value for s in pc.InstanceStatus]),
         default=pc.InstanceStatus.ACTIVE.value,
     )
+    backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Whether the control plane left the roles unmanaged (users and databases
+    # are None in the target), remembered to report them the same way
+    roles_unmanaged = properties.property(ra_types.Boolean(), default=False)
+    # The roles found on the data plane while they are unmanaged. Not a
+    # target field: it changes the full hash only, which is how the control
+    # plane learns about changes on the data plane, while a differing target
+    # field would make the agent apply the target instead of reporting it.
+    found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
 
-    _meta_fields: tp.ClassVar[set[str]] = {"uuid", "name", "nodes_number"}
+    _meta_fields: tp.ClassVar[set[str]] = {
+        "uuid",
+        "name",
+        "nodes_number",
+        "roles_unmanaged",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.c = ClientsSingleton()
 
     def get_meta_model_fields(self) -> set[str] | None:
-        return self._meta_fields
+        return set(self._meta_fields)
+
+    def get_resource_ignore_fields(self) -> list[str]:
+        return [*super().get_resource_ignore_fields(), "roles_unmanaged"]
 
     def _reconcile_target_users(self):
         actual_users = {
@@ -280,24 +309,89 @@ WHERE d.datname not in """
             "synchronous_mode": bool(sync_enabled),
             "synchronous_mode_strict": bool(sync_enabled),
             "synchronous_node_count": self.sync_replica_number,
+            "postgresql": {
+                "parameters": {
+                    "archive_command": pgbackrest.archive_command(self.backup),
+                },
+            },
         }
         LOG.info("DCS patch: %s", tconfig)
         self.c.pclient.config_patch(tconfig)
 
-    def _fill_DCS(self):
-        config = self.c.pclient.config_get()
+    def _fill_DCS(self, config: dict[str, tp.Any]) -> None:
         self.sync_replica_number = config["synchronous_node_count"]
 
-    @on_primary_only
+    def _reconcile_backup_stanza(self) -> None:
+        # Idempotent, but talks to the repository, so run it only when the
+        # repository changed or this node hasn't created the stanza yet
+        # (e.g. it has just become the primary)
+        if self.backup is None or pgbackrest.stanza_ready(self.backup):
+            return
+
+        pgbackrest.run(self.backup["stanza"], "stanza-create")
+        pgbackrest.mark_stanza_ready(self.backup)
+        LOG.info("Stanza %s created", self.backup["stanza"])
+
+    def _fill_backup(self, config: dict[str, tp.Any]) -> None:
+        spec = pgbackrest.load_spec()
+        parameters = config.get("postgresql", {}).get("parameters", {})
+
+        archiving = parameters.get("archive_command") == pgbackrest.archive_command(
+            spec
+        )
+        stanza_missing = (
+            spec is not None
+            and self.c.pclient.is_primary(get_ttl_hash(seconds=20))
+            and not pgbackrest.stanza_ready(spec)
+        )
+        self.backup = spec if archiving and not stanza_missing else BACKUP_UNSETTLED
+
     def dump_to_dp(self) -> None:
+        self.roles_unmanaged = self.users is None
+
+        primary = self.c.pclient.is_primary(get_ttl_hash(seconds=20))
+
+        # Stop archiving before the config it uses is removed
+        if primary and self.backup is None:
+            self._reconcile_DCS()
+
+        # Every node keeps the config, any of them may become the primary
+        if pgbackrest.apply_spec(self.backup):
+            LOG.info("Backup config updated")
+        if self.backup is None:
+            pgbackrest.mark_stanza_ready(None)
+
+        if not primary:
+            LOG.debug("Not a primary node, skipping the rest of dump_to_dp.")
+            return
+
+        # A primary is out of recovery, restore_command is no longer used
+        if pgbackrest.remove_restore_config():
+            LOG.info("Restore config removed")
+
+        # The stanza has to exist before archiving is turned on
+        self._reconcile_backup_stanza()
         self._reconcile_DCS()
-        self._reconcile_target_users()
-        self._reconcile_target_databases()
+        if self.users is not None:
+            self._reconcile_target_users()
+        if self.databases is not None:
+            self._reconcile_target_databases()
 
     def restore_from_dp(self) -> None:
+        self.users = {}
+        self.databases = {}
         self._fill_actual_users()
         self._fill_actual_databases()
-        self._fill_DCS()
+        config = self.c.pclient.config_get()
+        self._fill_DCS(config)
+        self._fill_backup(config)
+
+        if self.roles_unmanaged:
+            self.found_roles = {"users": self.users, "databases": self.databases}
+            self.users = None
+            self.databases = None
+        else:
+            self.found_roles = None
 
     @on_primary_only
     def delete_from_dp(self) -> None:
@@ -305,7 +399,6 @@ WHERE d.datname not in """
         # TODO: maybe node draining on cluster shrink should be here?
         pass
 
-    @on_primary_only
     def update_on_dp(self) -> None:
         self.dump_to_dp()
 

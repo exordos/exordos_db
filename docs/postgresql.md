@@ -125,6 +125,106 @@ Infrastructure layer that manages the underlying compute resources:
 }
 ```
 
+## Backups
+
+Setting `backup` on an instance enables continuous WAL archiving and periodic
+backups with [pgBackRest](https://pgbackrest.org/). The storage is described
+in full by the user: DBaaS neither creates buckets nor manages credentials, so
+the S3 lifecycle belongs to manifests and other elements.
+
+```json
+{
+  "backup": {
+    "kind": "s3",
+    "endpoint": "http://10.20.0.30:9000",
+    "bucket": "dbaas-backups",
+    "access_key": "backup",
+    "secret_key": "secret",
+    "region": "us-east-1",
+    "uri_style": "path",
+    "verify_tls": true,
+    "path": "/exordos_db",
+    "encryption_key": null,
+    "full_interval_hours": 168,
+    "incr_interval_hours": 24,
+    "retention_full": 2
+  }
+}
+```
+
+- `endpoint` is `http://` or `https://` with an optional port and no path.
+- `uri_style` is `path` (default, required for IP endpoints) or `host`.
+- The instance uuid is the pgBackRest stanza, so instances may share a bucket
+  and a `path`.
+- `encryption_key` turns on repository encryption (`aes-256-cbc`). Backups
+  can't be restored without it. Use it when the storage is reached over plain
+  HTTP.
+- A full backup is taken every `full_interval_hours`, an incremental one every
+  `incr_interval_hours`; `retention_full` full backups are kept together with
+  their incremental backups and WAL.
+- Setting `backup` to `null` stops archiving. Backups already in the storage
+  are left there.
+
+Credentials are stored in the instance and returned by the API to everyone who
+can read the instance.
+
+On the data plane the agent renders `/etc/pgbackrest/pgbackrest.conf` on every
+node, creates the stanza on the primary and sets `archive_command` through the
+Patroni DCS. `exordos-db-pg-backup.timer` runs every 15 minutes on every node
+and takes a backup on the primary when one is due. When the storage is
+unreachable WAL is kept up to a quarter of `disk_size` and dropped after that,
+so the database keeps running at the cost of a gap in point-in-time recovery.
+
+## Restoring to a Point in Time
+
+A new instance can start from the backups of another one instead of an empty
+database. `restore_from` is set on creation only; the source instance may
+already be deleted, its backups are found by the storage and the stanza.
+
+```json
+{
+  "name": "restored-postgres",
+  "cpu": 4,
+  "ram": 2048,
+  "disk_size": 100,
+  "nodes_number": 3,
+  "sync_replica_number": 1,
+  "version": "/v1/types/postgres/versions/VERSION_UUID",
+  "restore_from": {
+    "kind": "s3",
+    "endpoint": "http://10.20.0.30:9000",
+    "bucket": "dbaas-backups",
+    "access_key": "backup",
+    "secret_key": "secret",
+    "path": "/exordos_db",
+    "stanza": "SOURCE_INSTANCE_UUID",
+    "target_time": "2026-09-14T10:30:00Z"
+  }
+}
+```
+
+- The storage fields and `encryption_key` are the same as in `backup` of the
+  source instance.
+- `stanza` is the uuid of the source instance.
+- `target_time` is the moment to recover to; `null` replays the whole archive.
+  A time in the future is rejected. It has to be covered by the archive: after
+  the end of the oldest kept full backup and before the last archived WAL.
+- `version` and `disk_size` must fit the backup: the same PostgreSQL major
+  version and enough space for the data.
+- The new instance doesn't take backups unless its own `backup` is set. It
+  uses its own stanza, so the source's backups stay intact even in the same
+  bucket and `path`.
+
+Patroni bootstraps the cluster with `exordos-db-pg-restore`, which runs
+`pgbackrest restore`; PostgreSQL replays WAL up to the target and is promoted,
+replicas are cloned from it afterwards.
+
+Users and databases of the restored cluster appear in the API once the
+recovery is over. Imported users have no `password` (`null`) and keep their
+password hashes, so existing clients keep working; setting `password` changes
+it as usual. Users without a password and databases owned by roles DBaaS
+doesn't manage (e.g. `postgres`) aren't imported and get dropped.
+
 ## Validation Rules
 
 ### Instance Validation
