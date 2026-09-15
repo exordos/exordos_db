@@ -5,31 +5,27 @@
       
       
       
-        <link rel="canonical" href="https://github.com/infraguys/openapi/openapi_orch/">
+        <link rel="canonical" href="https://github.com/infraguys/persistent-storage-bootstrap/">
       
       
-        <link rel="prev" href="../openapi_user/">
-      
-      
-        <link rel="next" href="../openapi_status/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Orch - exordos_db</title>
+        <title>PostgreSQL dataplane bootstrap - exordos_db</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -48,13 +44,13 @@
       
     
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
     
     
-  <link href="../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
             html.glightbox-open { overflow: initial; height: 100%; }
             .gslide-title { margin-top: 0px; user-select: text; }
             .gslide-desc { color: #666; user-select: text; }
@@ -82,6 +78,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#postgresql-dataplane-bootstrap" class="md-skip">
+          Перейти к содержанию
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -94,7 +95,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Верхний колонтитул">
-    <a href="../.." title="exordos_db" class="md-header__button md-logo" aria-label="exordos_db" data-md-component="logo">
+    <a href=".." title="exordos_db" class="md-header__button md-logo" aria-label="exordos_db" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
@@ -114,7 +115,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Orch
+              PostgreSQL dataplane bootstrap
             
           </span>
         </div>
@@ -234,7 +235,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--integrated" aria-label="Навигация" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="exordos_db" class="md-nav__button md-logo" aria-label="exordos_db" data-md-component="logo">
+    <a href=".." title="exordos_db" class="md-nav__button md-logo" aria-label="exordos_db" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
@@ -264,7 +265,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../postgresql/" class="md-nav__link">
+      <a href="../postgresql/" class="md-nav__link">
         
   
   
@@ -288,20 +289,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked="">
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2">
         
           
           <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
@@ -322,7 +321,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -340,7 +339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../openapi_user/" class="md-nav__link">
+      <a href="../openapi/openapi_user/" class="md-nav__link">
         
   
   
@@ -365,17 +364,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../openapi/openapi_orch/" class="md-nav__link">
         
   
   
@@ -391,7 +383,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -404,7 +395,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../openapi_status/" class="md-nav__link">
+      <a href="../openapi/openapi_status/" class="md-nav__link">
         
   
   
@@ -452,20 +443,44 @@
   
 
 
-  <h1>Orch</h1>
-
-<p><a href="./">openapi_orch.md</a># OpenAPI Specification</p>
-<p>You can view the OpenAPI specification for the Orch API here:</p>
-<p><link type="text/css" rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></p>
-<div id="swagger-ui-1">
-</div>
-<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" charset="UTF-8"></script>
-<script>
-    SwaggerUIBundle({
-      url: 'openapi_orch.yaml',
-      dom_id: '#swagger-ui-1',
-    })
-</script>
+<h1 id="postgresql-dataplane-bootstrap">PostgreSQL dataplane bootstrap<a class="headerlink" href="#postgresql-dataplane-bootstrap" title="Permanent link">#</a></h1>
+<p>Both the PG agent and the base configuration-delivery agent are ordered after
+<code>exordos-bootstrap.service</code>. The dependency is <code>Wants</code>, not <code>Requires</code>: a failed
+bootstrap must not permanently remove the agent from service. After a failed
+bootstrap the agent can report configuration errors; it must not silently start
+Patroni on the root filesystem.</p>
+<p>The PG image installs a drop-in for <code>exordos-universal-agent.service</code>, which
+delivers <code>patroni.yml</code>. Ordering only <code>exordos-db-pg-agent</code> would leave that
+configuration path unprotected. Control-plane images are not changed.</p>
+<p>Bootstrap stops Patroni before preparing storage and keeps it stopped until
+both the PostgreSQL data and Raft directories have been migrated. Only then is
+Patroni enabled and started. A failed migration exits without starting Patroni.</p>
+<p>Patroni requires <code>/persist</code> and both bind-mounted data directories. Missing
+mounts fail the service start through systemd assertions, rather than skipping
+it through a condition. An absent configuration file still skips startup; the
+first delivered configuration uses <code>reload-or-restart</code> to start an inactive
+service and propagate a failed start back to the configuration agent.</p>
+<h2 id="recovery">Recovery<a class="headerlink" href="#recovery" title="Permanent link">#</a></h2>
+<p>Inspect <code>journalctl -u exordos-bootstrap -u exordos-patroni</code> and the storage
+devices before retrying. Repair the underlying disk or mount problem without
+formatting existing data. Retry the installed PG bootstrap script:</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>exordos-universal-agent<span class="w"> </span>exordos-db-pg-agent
+sudo<span class="w"> </span>/var/lib/exordos/bootstrap/scripts/0100-ec-bootstrap.sh
+sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>exordos-universal-agent<span class="w"> </span>exordos-db-pg-agent
+</code></pre></div>
+<p>During a manual retry, stop both agents first so a concurrent configuration
+update cannot restart Patroni between migrations. Start the agents again even
+if the retry fails, so they can report the configuration failure.</p>
+<p>The shared bootstrap completion marker alone is not proof that the PG storage
+step succeeded. Verify <code>findmnt --mountpoint</code> for <code>/persist</code>,
+<code>/var/lib/postgresql/patroni/data</code>, and <code>/var/lib/postgresql/patroni/raft</code>, then
+check Patroni and the control-plane configuration status.</p>
+<h2 id="regression-checks">Regression checks<a class="headerlink" href="#regression-checks" title="Permanent link">#</a></h2>
+<p><code>tox -e py312</code> runs the real PG bootstrap script with command stubs, covering
+stop failures, disk discovery/preparation errors, failures in either migration,
+and a successful retry. It also checks agent ordering, hard mount assertions,
+and startup on first configuration. These tests do not replace a real image boot
+with an attached persistent disk.</p>
 
 
 
@@ -515,10 +530,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["search.suggest", "search.highlight", "toc.integrate", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u043e \u0432 \u0431\u0443\u0444\u0435\u0440", "clipboard.copy": "\u041a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0432 \u0431\u0443\u0444\u0435\u0440", "search.result.more.one": "\u0415\u0449\u0451 1 \u043d\u0430 \u044d\u0442\u043e\u0439 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435", "search.result.more.other": "\u0415\u0449\u0451 # \u043d\u0430 \u044d\u0442\u043e\u0439 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435", "search.result.none": "\u0421\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0439 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e", "search.result.one": "\u041d\u0430\u0439\u0434\u0435\u043d\u043e 1 \u0441\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0435", "search.result.other": "\u041d\u0430\u0439\u0434\u0435\u043d\u043e \u0441\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0439: #", "search.result.placeholder": "\u041d\u0430\u0447\u043d\u0438\u0442\u0435 \u043f\u0435\u0447\u0430\u0442\u0430\u0442\u044c \u0434\u043b\u044f \u043f\u043e\u0438\u0441\u043a\u0430", "search.result.term.missing": "\u041e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442", "select.version": "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0435\u0440\u0441\u0438\u044e"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["search.suggest", "search.highlight", "toc.integrate", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u043e \u0432 \u0431\u0443\u0444\u0435\u0440", "clipboard.copy": "\u041a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0432 \u0431\u0443\u0444\u0435\u0440", "search.result.more.one": "\u0415\u0449\u0451 1 \u043d\u0430 \u044d\u0442\u043e\u0439 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435", "search.result.more.other": "\u0415\u0449\u0451 # \u043d\u0430 \u044d\u0442\u043e\u0439 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435", "search.result.none": "\u0421\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0439 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e", "search.result.one": "\u041d\u0430\u0439\u0434\u0435\u043d\u043e 1 \u0441\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0435", "search.result.other": "\u041d\u0430\u0439\u0434\u0435\u043d\u043e \u0441\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0439: #", "search.result.placeholder": "\u041d\u0430\u0447\u043d\u0438\u0442\u0435 \u043f\u0435\u0447\u0430\u0442\u0430\u0442\u044c \u0434\u043b\u044f \u043f\u043e\u0438\u0441\u043a\u0430", "search.result.term.missing": "\u041e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442", "select.version": "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0435\u0440\u0441\u0438\u044e"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   
