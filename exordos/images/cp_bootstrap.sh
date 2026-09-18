@@ -27,8 +27,28 @@ SERVICE_CONFIG="/etc/exordos_db/exordos_db.conf"
 CORE_AGENT_CONFIG="/etc/exordos_db/core_agent.conf"
 PG_VERSION="18"
 
-while [ ! -f /etc/exordos_init.txt ]; do sleep 1; done
-source /etc/exordos_init.txt
+INIT_FILE="/etc/exordos_init.txt"
+INIT_KEYS="IAM_USER_NAME IAM_USER_PASS PROJECT_ID GC_HS256_JWKS_ENCRYPTION_KEY AUDIENCE"
+
+# An agent may write the file in place, so it may exist before it's complete.
+# A key missing from a partly written file would silently take its default
+# below. The copy is what's checked and read, the file may change meanwhile.
+INIT_COPY=$(mktemp)
+trap 'rm -f "$INIT_COPY"' EXIT
+init_copy_complete() {
+    local key
+
+    [[ -s "$INIT_COPY" ]] || return 1
+    # The content ends with a line break, the last line may still be cut
+    [[ -z "$(tail -c 1 "$INIT_COPY")" ]] || return 1
+    for key in $INIT_KEYS; do
+        grep -q "^${key}=" "$INIT_COPY" || return 1
+    done
+}
+
+until cp "$INIT_FILE" "$INIT_COPY" 2>/dev/null && init_copy_complete; do sleep 1; done
+source "$INIT_COPY"
+rm -f "$INIT_COPY"
 
 export IAM_USER_NAME="${IAM_USER_NAME:-exordos_db}"
 export IAM_USER_PASS="${IAM_USER_PASS:-exordos_db}"
