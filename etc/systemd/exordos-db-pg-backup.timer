@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic Exordos Database PG backup
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

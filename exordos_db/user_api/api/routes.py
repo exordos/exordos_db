@@ -42,6 +42,15 @@ class PGVersionRoute(routes.Route):
     __controller__ = controllers.PGVersionController
 
 
+class PGBackupRepositoryRoute(routes.Route):
+    __controller__ = controllers.PGBackupRepositoryController
+
+
+class PGBackupRoute(routes.Route):
+    __controller__ = controllers.PGBackupController
+    __allow_methods__: tp.ClassVar[list] = [routes.FILTER, routes.GET]
+
+
 class PGRoute(routes.Route):
     __controller__ = controllers.PGController
     __allow_methods__: tp.ClassVar[list] = [routes.FILTER]
@@ -51,6 +60,12 @@ class PGRoute(routes.Route):
 
     # route to /v1/types/postgres/versions/[<uuid>]
     versions = routes.route(PGVersionRoute)
+
+    # route to /v1/types/postgres/backup_repositories/[<uuid>]
+    backup_repositories = routes.route(PGBackupRepositoryRoute)
+
+    # route to /v1/types/postgres/backups/[<uuid>]
+    backups = routes.route(PGBackupRoute)
 
 
 class TypeRoute(routes.Route):
