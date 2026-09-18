@@ -47,6 +47,9 @@ init_copy_complete() {
 }
 
 until cp "$INIT_FILE" "$INIT_COPY" 2>/dev/null && init_copy_complete; do sleep 1; done
+
+# The init file carries credentials: keep them out of the boot log
+set +x
 source "$INIT_COPY"
 rm -f "$INIT_COPY"
 
@@ -59,6 +62,7 @@ export AUDIENCE="${AUDIENCE:-}"
 export GC_PG_USER="${GC_PG_USER:-exordos_db}"
 export GC_PG_PASS="${GC_PG_PASS:-$(generate_secure_password)}"
 export GC_PG_DB="${GC_PG_DB:-exordos_db}"
+set -x
 
 # persistent data routines
 PERSISTENT_DISK=$(find_persistent_disk)
@@ -76,7 +80,9 @@ if [[ -n "$PERSISTENT_DISK" ]]; then
 fi
 
 if [[ ! -f $SERVICE_CONFIG ]]; then
+    set +x
     setup_postgresql_user_and_db "$GC_PG_USER" "$GC_PG_PASS" "$GC_PG_DB"
+    set -x
     try_generate_config $SERVICE_CONFIG
     try_generate_config $CORE_AGENT_CONFIG
 fi
