@@ -95,6 +95,12 @@ sudo systemctl disable --now "postgresql@${PG_VERSION}-main"
 sudo systemctl disable --now postgresql
 sudo ln -s /usr/lib/postgresql/$PG_VERSION/bin/* /usr/sbin/
 
+# PostgreSQL metrics for the vmagent of the base image, run by our own unit
+sudo apt -y install prometheus-postgres-exporter
+sudo systemctl disable --now prometheus-postgres-exporter
+sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter.service" $SYSTEMD_SERVICE_DIR
+sudo systemctl enable exordos-postgres-exporter
+
 # Setup watchdog
 cat <<EOF | sudo tee /etc/udev/rules.d/99-watchdog.rules
 KERNEL=="watchdog", OWNER="postgres", GROUP="postgres"

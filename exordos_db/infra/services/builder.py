@@ -29,6 +29,7 @@ from gcl_sdk.infra.services import builder
 from oslo_config import cfg
 from restalchemy.dm import filters as dm_filters
 
+from exordos_db.common import constants as c
 from exordos_db.infra.dm import models
 
 LOG = logging.getLogger(__name__)
@@ -170,6 +171,47 @@ def bootstrap_method(instance: models.PGInstance) -> str:
     return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
 
 
+VMAGENT_SCRAPE_JOB_TEMPLATE = """\
+  - job_name: "{job}"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["{target}"]
+        labels:
+          instance: "__HOSTNAME__"
+          exordos_db_instance: "{instance_uuid}"
+          exordos_project: "{project_id}"
+"""
+
+
+def render_vmagent_scrape(
+    instance_uuid: sys_uuid.UUID, project_id: sys_uuid.UUID
+) -> str:
+    """Render the vmagent scrape config template, the same for every node.
+
+    It replaces the one of the base image, which only scrapes node_exporter,
+    and labels every series with the instance uuid and its project; the node
+    host name stays in `instance`, as the base image has it.
+    """
+    jobs = (
+        ("node_exporter", c.NODE_EXPORTER_ENDPOINT),
+        ("patroni", f"127.0.0.1:{c.PATRONI_API_PORT}"),
+        ("postgres_exporter", c.POSTGRES_EXPORTER_ENDPOINT),
+    )
+    return (
+        "# vmagent scrape configuration template of a DBaaS node\n"
+        "# Managed by Exordos DB control plane — do not edit manually\n"
+        "scrape_configs:\n"
+    ) + "".join(
+        VMAGENT_SCRAPE_JOB_TEMPLATE.format(
+            job=job,
+            target=target,
+            instance_uuid=instance_uuid,
+            project_id=project_id,
+        )
+        for job, target in jobs
+    )
+
+
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
     def __init__(
         self,
@@ -289,6 +331,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                     key.delete()
 
         sync_mode = "true" if instance.sync_replica_number else "false"
+        scrape_content = render_vmagent_scrape(instance.uuid, instance.project_id)
 
         # Just recreate configs, it'll be updated in DB if already exist
         for node_uuid, node in nodeset.nodes.items():
@@ -306,6 +349,11 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                 uuid.UUID(node_uuid), self._project_id, content
             )
             new_objects.append(config)
+            new_objects.append(
+                instance._create_vmagent_config(
+                    uuid.UUID(node_uuid), self._project_id, scrape_content
+                )
+            )
 
             if instance.restore_from is not None:
                 new_objects.append(

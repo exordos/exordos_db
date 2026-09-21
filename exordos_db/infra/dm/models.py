@@ -22,6 +22,7 @@ from gcl_sdk.agents.universal.dm import models as ua_models
 from gcl_sdk.infra import constants as sdk_c
 from gcl_sdk.infra.dm import models as sdk_models
 
+from exordos_db.common import constants as c
 from exordos_db.common import pgbackrest
 from exordos_db.user_api.dm import models
 
@@ -104,6 +105,38 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
             group="postgres",
             # Carries repository credentials
             mode="0600",
+        )
+
+    # vmagent reads the template only when it starts. A stopped one, waiting
+    # for the observability element, is left alone and reads it later; nodes
+    # of images older than base 1.3.1 have no vmagent at all. Its start waits
+    # a minute or more, so the agent doesn't wait for it.
+    OnVmagentScrapeChangeFunc = sdk_models.OnChangeShell(
+        command=(
+            "if systemctl cat exordos-vmagent >/dev/null 2>&1; then "
+            "systemctl --no-block try-restart exordos-vmagent; fi"
+        )
+    )
+
+    def _create_vmagent_config(
+        self, node_uuid: sys_uuid.UUID, project_id: sys_uuid.UUID, content: str
+    ) -> sdk_models.Config:
+        return sdk_models.Config(
+            uuid=sys_uuid.uuid5(self.uuid, f"vmagent-scrape-{node_uuid}"),
+            name=f"{node_uuid}-vmagent-scrape",
+            project_id=project_id,
+            status=sdk_c.InstanceStatus.NEW.value,
+            target=sdk_models.NodeTarget(
+                node=node_uuid,
+            ),
+            body=sdk_models.TextBodyConfig(
+                content=content,
+            ),
+            path=c.VMAGENT_SCRAPE_TEMPLATE,
+            owner="root",
+            group="root",
+            mode="0644",
+            on_change=self.OnVmagentScrapeChangeFunc,
         )
 
     def get_infra(

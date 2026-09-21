@@ -1,0 +1,19 @@
+[Unit]
+Description=Exordos PostgreSQL exporter (Prometheus)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Peer authentication over the local socket, no password to deliver
+User=postgres
+Group=postgres
+Environment="DATA_SOURCE_NAME=host=/var/run/postgresql user=postgres dbname=postgres sslmode=disable"
+ExecStart=/usr/bin/prometheus-postgres-exporter \
+    --web.listen-address=127.0.0.1:9187
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
