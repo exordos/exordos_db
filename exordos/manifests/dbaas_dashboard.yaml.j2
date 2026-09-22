@@ -1,0 +1,539 @@
+name: "dbaas_dashboard"
+description: "Grafana dashboard of PostgreSQL instances (health, replication, disk, load, logs) on the shared observability Grafana instance."
+schema_version: 1
+version: "{{ version }}"
+api_version: "v1"
+
+requirements:
+  core:
+    from_version: "0.0.0"
+  grafanaaas:
+    from_version: "0.0.0"
+  observability:
+    from_version: "0.0.1"
+
+resources:
+
+  # The panels read the series the control plane labels with
+  # exordos_db_instance/exordos_project, node_exporter ones included, and the
+  # journald logs of exordos-patroni (Patroni and PostgreSQL) that the base
+  # image relays to VictoriaLogs, told apart by the node host name. See
+  # docs/monitoring.md. A legend that needs Grafana's double-brace syntax is
+  # written as a Jinja string literal. The element manager reads a value that
+  # starts with $ as a link, so Grafana's ${var} syntax can't be used for a
+  # whole value: metrics panels take the default datasource and logs panels
+  # the uuid of the VictoriaLogs datasource of the observability element.
+  $grafanaaas.types.grafana.dashboards:
+    dbaas:
+      name: "dbaas"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      source:
+        kind: raw
+        content:
+          title: PostgreSQL instance
+          uid: exordos-dbaas-instance
+          description: Health, replication, disk, load and logs of one PostgreSQL instance (dbaas).
+          schemaVersion: 41
+          version: 1
+          refresh: 1m
+          time:
+            from: now-6h
+            to: now
+          tags:
+          - dbaas
+          - postgresql
+          templating:
+            list:
+            - name: project
+              label: Project
+              type: query
+              query:
+                query: label_values(patroni_postgres_running, exordos_project)
+                refId: project
+              definition: label_values(patroni_postgres_running, exordos_project)
+              refresh: 2
+              sort: 1
+              includeAll: true
+              allValue: .+
+            - name: db
+              label: Instance
+              type: query
+              query:
+                query: label_values(patroni_postgres_running{exordos_project=~"$project"}, exordos_db_instance)
+                refId: db
+              definition: label_values(patroni_postgres_running{exordos_project=~"$project"}, exordos_db_instance)
+              refresh: 2
+              sort: 1
+          panels:
+          - id: 1
+            type: row
+            title: Overview
+            collapsed: false
+            gridPos:
+              h: 1
+              w: 24
+              x: 0
+              y: 0
+            panels: []
+          - id: 2
+            type: stat
+            title: Primaries
+            gridPos:
+              h: 6
+              w: 4
+              x: 0
+              y: 1
+            targets:
+            - refId: A
+              expr: count(patroni_primary{exordos_db_instance="$db"} == 1) or vector(0)
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: red
+                    value: null
+                  - color: green
+                    value: 1
+                  - color: red
+                    value: 2
+              overrides: []
+            description: Nodes Patroni runs as the primary. Anything but 1 means the instance has no leader or is split.
+          - id: 3
+            type: stat
+            title: PostgreSQL running
+            gridPos:
+              h: 6
+              w: 4
+              x: 4
+              y: 1
+            targets:
+            - refId: A
+              expr: sum(patroni_postgres_running{exordos_db_instance="$db"})
+              legendFormat: running
+            - refId: B
+              expr: count(patroni_postgres_running{exordos_db_instance="$db"})
+              legendFormat: nodes
+            fieldConfig:
+              defaults: {}
+              overrides: []
+            options:
+              colorMode: none
+              textMode: value_and_name
+              graphMode: none
+            description: Nodes whose PostgreSQL is up, out of the nodes that report to Patroni.
+          - id: 4
+            type: gauge
+            title: Fullest data disk
+            gridPos:
+              h: 6
+              w: 4
+              x: 8
+              y: 1
+            targets:
+            - refId: A
+              expr: max(100 * (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"}) / (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} + node_filesystem_avail_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"}))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: percent
+                min: 0
+                max: 100
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: green
+                    value: null
+                  - color: orange
+                    value: 80
+                  - color: red
+                    value: 90
+              overrides: []
+            description: How full the fullest data disk of the instance is, as df counts it. PostgreSQL stops once it cannot write WAL.
+          - id: 5
+            type: stat
+            title: Max replay lag
+            gridPos:
+              h: 6
+              w: 4
+              x: 12
+              y: 1
+            targets:
+            - refId: A
+              expr: max(pg_replication_lag_seconds{exordos_db_instance="$db"})
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: s
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: green
+                    value: null
+                  - color: orange
+                    value: 10
+                  - color: red
+                    value: 60
+              overrides: []
+            description: Replay lag of the most lagging replica, 0 when every replica has replayed what it received.
+          - id: 6
+            type: stat
+            title: Connections used
+            gridPos:
+              h: 6
+              w: 4
+              x: 16
+              y: 1
+            targets:
+            - refId: A
+              expr: max(100 * sum by (instance) (pg_stat_activity_count{exordos_db_instance="$db",backend_type="client backend"}) / on (instance) max by (instance) (pg_settings_max_connections{exordos_db_instance="$db"}))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: percent
+                min: 0
+                max: 100
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: green
+                    value: null
+                  - color: orange
+                    value: 80
+                  - color: red
+                    value: 95
+              overrides: []
+            description: Share of max_connections in use on the busiest node.
+          - id: 7
+            type: stat
+            title: Timeline
+            gridPos:
+              h: 6
+              w: 4
+              x: 20
+              y: 1
+            targets:
+            - refId: A
+              expr: max(patroni_postgres_timeline{exordos_db_instance="$db"})
+              legendFormat: ''
+            fieldConfig:
+              defaults: {}
+              overrides: []
+            options:
+              colorMode: none
+              graphMode: area
+            description: Current timeline. It grows by one on every failover or switchover.
+          - id: 8
+            type: row
+            title: Nodes and replication
+            collapsed: false
+            gridPos:
+              h: 1
+              w: 24
+              x: 0
+              y: 7
+            panels: []
+          - id: 9
+            type: state-timeline
+            title: Role
+            gridPos:
+              h: 8
+              w: 12
+              x: 0
+              y: 8
+            targets:
+            - refId: A
+              expr: max by (instance) (patroni_primary{exordos_db_instance="$db"}) * 2 + max by (instance) (patroni_replica{exordos_db_instance="$db"})
+              legendFormat: "{{ '{{instance}}' }}"
+            fieldConfig:
+              defaults:
+                mappings:
+                - type: value
+                  options:
+                    '0':
+                      text: down
+                      color: red
+                    '1':
+                      text: replica
+                      color: blue
+                    '2':
+                      text: primary
+                      color: green
+              overrides: []
+            options:
+              showValue: never
+              mergeValues: true
+            description: Primary or replica per node over time, a switch of colours is a failover or a switchover.
+          - id: 10
+            type: timeseries
+            title: Replay lag
+            gridPos:
+              h: 8
+              w: 12
+              x: 12
+              y: 8
+            targets:
+            - refId: A
+              expr: max by (instance) (pg_replication_lag_seconds{exordos_db_instance="$db"})
+              legendFormat: "{{ '{{instance}}' }}"
+            fieldConfig:
+              defaults:
+                unit: s
+              overrides: []
+            description: Seconds behind the primary per replica, 0 once it has replayed everything it received.
+          - id: 11
+            type: timeseries
+            title: Replication lag in bytes, as the primary sees it
+            gridPos:
+              h: 8
+              w: 12
+              x: 0
+              y: 16
+            targets:
+            - refId: A
+              expr: max by (application_name) (pg_stat_replication_pg_wal_lsn_diff{exordos_db_instance="$db"})
+              legendFormat: "{{ '{{application_name}}' }}"
+            fieldConfig:
+              defaults:
+                unit: bytes
+              overrides: []
+            description: WAL the primary has written and each connected replica (its node uuid) has not replayed yet.
+          - id: 12
+            type: timeseries
+            title: WAL not replayed, as Patroni sees it
+            gridPos:
+              h: 8
+              w: 12
+              x: 12
+              y: 16
+            targets:
+            - refId: A
+              expr: max(patroni_xlog_location{exordos_db_instance="$db"}) - on () group_right () max by (instance) (patroni_xlog_replayed_location{exordos_db_instance="$db"} and patroni_replica{exordos_db_instance="$db"} == 1)
+              legendFormat: "{{ '{{instance}}' }}"
+            fieldConfig:
+              defaults:
+                unit: bytes
+              overrides: []
+            description: Also covers a replica that has lost its connection to the primary.
+          - id: 13
+            type: row
+            title: Disk
+            collapsed: false
+            gridPos:
+              h: 1
+              w: 24
+              x: 0
+              y: 24
+            panels: []
+          - id: 14
+            type: timeseries
+            title: Data disk used per node
+            gridPos:
+              h: 8
+              w: 8
+              x: 0
+              y: 25
+            targets:
+            - refId: A
+              expr: 100 * (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"}) / (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} + node_filesystem_avail_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"})
+              legendFormat: "{{ '{{instance}}' }}"
+            fieldConfig:
+              defaults:
+                unit: percent
+                min: 0
+                max: 100
+              overrides: []
+            description: The data disk holds PGDATA with pg_wal, the Raft state of Patroni and /var/log.
+          - id: 15
+            type: timeseries
+            title: Database sizes
+            gridPos:
+              h: 8
+              w: 8
+              x: 8
+              y: 25
+            targets:
+            - refId: A
+              expr: max by (datname) (pg_database_size_bytes{exordos_db_instance="$db",datname!~"template[01]"})
+              legendFormat: "{{ '{{datname}}' }}"
+            fieldConfig:
+              defaults:
+                unit: bytes
+              overrides: []
+          - id: 16
+            type: timeseries
+            title: pg_wal size per node
+            gridPos:
+              h: 8
+              w: 8
+              x: 16
+              y: 25
+            targets:
+            - refId: A
+              expr: max by (instance) (pg_wal_size_bytes{exordos_db_instance="$db"})
+              legendFormat: "{{ '{{instance}}' }}"
+            fieldConfig:
+              defaults:
+                unit: bytes
+              overrides: []
+            description: The primary keeps WAL a lagging replica's slot still needs; a replica keeps WAL it has not replayed yet.
+          - id: 17
+            type: row
+            title: Sessions and load
+            collapsed: false
+            gridPos:
+              h: 1
+              w: 24
+              x: 0
+              y: 33
+            panels: []
+          - id: 18
+            type: timeseries
+            title: Client sessions by state
+            gridPos:
+              h: 8
+              w: 8
+              x: 0
+              y: 34
+            targets:
+            - refId: A
+              expr: sum by (state) (pg_stat_activity_count{exordos_db_instance="$db",backend_type="client backend"})
+              legendFormat: "{{ '{{state}}' }}"
+            fieldConfig:
+              defaults: {}
+              overrides: []
+          - id: 19
+            type: timeseries
+            title: Transactions
+            gridPos:
+              h: 8
+              w: 8
+              x: 8
+              y: 34
+            targets:
+            - refId: A
+              expr: sum(rate(pg_stat_database_xact_commit{exordos_db_instance="$db"}[5m]))
+              legendFormat: commits
+            - refId: B
+              expr: sum(rate(pg_stat_database_xact_rollback{exordos_db_instance="$db"}[5m]))
+              legendFormat: rollbacks
+            fieldConfig:
+              defaults:
+                unit: ops
+              overrides: []
+          - id: 20
+            type: timeseries
+            title: Cache hit ratio
+            gridPos:
+              h: 8
+              w: 8
+              x: 16
+              y: 34
+            targets:
+            - refId: A
+              expr: sum by (instance) (rate(pg_stat_database_blks_hit{exordos_db_instance="$db"}[5m])) / (sum by (instance) (rate(pg_stat_database_blks_hit{exordos_db_instance="$db"}[5m])) + sum by (instance) (rate(pg_stat_database_blks_read{exordos_db_instance="$db"}[5m])))
+              legendFormat: "{{ '{{instance}}' }}"
+            fieldConfig:
+              defaults:
+                unit: percentunit
+                min: 0
+                max: 1
+              overrides: []
+            description: Share of block reads served from shared buffers.
+          - id: 21
+            type: row
+            title: Logs
+            collapsed: false
+            gridPos:
+              h: 1
+              w: 24
+              x: 0
+              y: 42
+            panels: []
+          - id: 22
+            type: timeseries
+            title: Log lines per node
+            datasource: &id001
+              type: victoriametrics-logs-datasource
+              uid: $dbaas_dashboard.imports.$logs_datasource:uuid
+            gridPos:
+              h: 7
+              w: 12
+              x: 0
+              y: 43
+            targets:
+            - refId: A
+              expr: _HOSTNAME:~"^dbaas-dp-$db-node-" _SYSTEMD_UNIT:"exordos-patroni.service" | stats by (_HOSTNAME) count() lines
+              queryType: statsRange
+              legendFormat: "{{ '{{_HOSTNAME}}' }}"
+            fieldConfig:
+              defaults:
+                custom:
+                  drawStyle: bars
+                  fillOpacity: 60
+                  stacking:
+                    mode: normal
+              overrides: []
+            description: Patroni and PostgreSQL log lines, from journald through VictoriaLogs.
+          - id: 23
+            type: timeseries
+            title: Errors per node
+            datasource: *id001
+            gridPos:
+              h: 7
+              w: 12
+              x: 12
+              y: 43
+            targets:
+            - refId: A
+              expr: _HOSTNAME:~"^dbaas-dp-$db-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):" | stats by (_HOSTNAME) count() errors
+              queryType: statsRange
+              legendFormat: "{{ '{{_HOSTNAME}}' }}"
+            fieldConfig:
+              defaults:
+                custom:
+                  drawStyle: bars
+                  fillOpacity: 60
+                  stacking:
+                    mode: normal
+              overrides: []
+            description: PostgreSQL ERROR, FATAL and PANIC lines and Patroni errors.
+          - id: 24
+            type: logs
+            title: PostgreSQL and Patroni logs
+            datasource: *id001
+            gridPos:
+              h: 14
+              w: 24
+              x: 0
+              y: 50
+            targets:
+            - refId: A
+              expr: _HOSTNAME:~"^dbaas-dp-$db-node-" _SYSTEMD_UNIT:"exordos-patroni.service"
+              queryType: instant
+              maxLines: 1000
+            options:
+              showTime: true
+              wrapLogMessage: true
+              sortOrder: Descending
+              enableLogDetails: true
+              dedupStrategy: none
+
+  $dbaas_dashboard.imports.$grafana_instance.dashboards:
+    dbaas_binding:
+      name: "dbaas"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      instance: $dbaas_dashboard.imports.$grafana_instance:uuid
+      folder: "DBaaS"
+      version_ref: $grafanaaas.types.grafana.dashboards.$dbaas:version_ref
+
+imports:
+  grafana_instance:
+    element: "$observability"
+    kind: "resource"
+    link: "$grafanaaas.types.grafana.instances.$grafana"
+  logs_datasource:
+    element: "$observability"
+    kind: "resource"
+    link: "$grafanaaas.types.grafana.instances.$grafana.datasources.$victoria_logs_ds"

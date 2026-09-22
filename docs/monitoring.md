@@ -126,6 +126,33 @@ Size of `pg_wal` on each node:
 max by (exordos_db_instance, instance) (pg_wal_size_bytes)
 ```
 
+## Logs
+
+The base image relays the journal of every node to the platform VictoriaLogs.
+Patroni and PostgreSQL both write to the journal of `exordos-patroni`,
+PostgreSQL through the standard error Patroni starts it with, so their lines
+arrive with nothing added on the node. The node host name, in `_HOSTNAME`,
+carries the instance uuid:
+
+```logsql
+_HOSTNAME:~"^dbaas-dp-<instance uuid>-node-" _SYSTEMD_UNIT:"exordos-patroni.service"
+```
+
+Errors only:
+
+```logsql
+_HOSTNAME:~"^dbaas-dp-<instance uuid>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
+```
+
+## Dashboard
+
+The `dbaas_dashboard` element puts a **PostgreSQL instance** dashboard into the
+**DBaaS** folder of the shared observability Grafana, per project and
+instance: primaries, role of each node, replication lag, disk fullness,
+database and `pg_wal` sizes, sessions, transactions, cache hit ratio, and the
+Patroni and PostgreSQL logs with the error rate. It depends on the
+`observability` element; install it after that one.
+
 ## Notes
 
 - **Only vmagent restarts on a change of the labels or the jobs.** The

@@ -27,6 +27,6 @@ The platform consists of:
 
 ## Monitoring
 
-See [docs/monitoring.md](docs/monitoring.md) for the metrics the nodes send to
-the observability element and how to query them, how full the disks are
-included.
+See [docs/monitoring.md](docs/monitoring.md) for the metrics and logs the nodes
+send to the observability element, the Grafana dashboard, and how to query
+them, how full the disks are included.

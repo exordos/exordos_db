@@ -126,6 +126,33 @@ max by (exordos_db_instance, datname) (pg_database_size_bytes{datname!~"template
 max by (exordos_db_instance, instance) (pg_wal_size_bytes)
 ```
 
+## Логи
+
+Базовый образ отправляет журнал каждой ноды в платформенную VictoriaLogs.
+Patroni и PostgreSQL оба пишут в журнал `exordos-patroni` (PostgreSQL — через
+stderr, с которым его запускает Patroni), так что их строки доходят без
+какой-либо настройки на ноде. Имя хоста ноды в `_HOSTNAME` содержит uuid
+инстанса:
+
+```logsql
+_HOSTNAME:~"^dbaas-dp-<uuid инстанса>-node-" _SYSTEMD_UNIT:"exordos-patroni.service"
+```
+
+Только ошибки:
+
+```logsql
+_HOSTNAME:~"^dbaas-dp-<uuid инстанса>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
+```
+
+## Дашборд
+
+Элемент `dbaas_dashboard` кладёт дашборд **PostgreSQL instance** в папку
+**DBaaS** общей Grafana элемента observability, с выбором проекта и инстанса:
+число праймари, роль каждой ноды, отставание репликации, заполненность дисков,
+размеры баз и `pg_wal`, сессии, транзакции, попадания в кэш, а также логи
+Patroni и PostgreSQL с частотой ошибок. Зависит от элемента `observability`,
+ставится после него.
+
 ## Заметки
 
 - **При смене меток или job'ов перезапускается только vmagent.** Шаблон —

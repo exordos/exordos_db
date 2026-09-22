@@ -16,6 +16,7 @@
 
 import configparser
 from pathlib import Path
+import re
 import uuid as sys_uuid
 
 import yaml
@@ -77,3 +78,68 @@ def test_postgres_exporter_listens_locally_and_is_enabled():
     assert "--web.listen-address=127.0.0.1:9187" in parser["Service"]["ExecStart"]
     install = (ROOT / "exordos/images/pg_install.sh").read_text()
     assert "sudo systemctl enable exordos-postgres-exporter\n" in install
+
+
+def _dashboard() -> dict:
+    manifest = (ROOT / "exordos/manifests/dbaas_dashboard.yaml.j2").read_text()
+    # The only Jinja in it: the version and the string literals of legends
+    rendered = re.sub(
+        r"\{\{ '(\{\{\w+\}\})' \}\}",
+        r"\1",
+        manifest.replace("{{ version }}", "0.0.0"),
+    )
+    resources = yaml.safe_load(rendered)["resources"]
+    return resources["$grafanaaas.types.grafana.dashboards"]["dbaas"]["source"][
+        "content"
+    ]
+
+
+def test_dashboard_panels_select_the_chosen_instance():
+    panels = [p for p in _dashboard()["panels"] if p["type"] != "row"]
+
+    for panel in panels:
+        for target in panel["targets"]:
+            # Metrics by the label of the control plane or the node host
+            # name, logs by the node host name
+            assert (
+                'exordos_db_instance="$db"' in target["expr"]
+                or "dbaas-dp-$db-node-" in target["expr"]
+            ), panel["title"]
+    logs = [p for p in panels if "datasource" in p]
+    assert {p["datasource"]["type"] for p in logs} == {
+        "victoriametrics-logs-datasource"
+    }
+    assert {p["datasource"]["uid"] for p in logs} == {
+        "$dbaas_dashboard.imports.$logs_datasource:uuid"
+    }
+
+
+def _strings(value):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+    elif isinstance(value, str):
+        yield value
+
+
+def test_dashboard_leaves_values_starting_with_dollar_to_manifest_links():
+    # The element manager renders such a value as a link, a Grafana ${var}
+    # there stops it
+    starting = {s for s in _strings(_dashboard()) if s.startswith("$")}
+
+    assert starting == {"$dbaas_dashboard.imports.$logs_datasource:uuid"}
+
+
+def test_dashboard_legends_survive_the_manifest_template():
+    legends = {
+        t["legendFormat"]
+        for p in _dashboard()["panels"]
+        for t in p.get("targets", ())
+        if t.get("legendFormat")
+    }
+
+    assert "{{instance}}" in legends
+    assert all("{{" not in legend or legend.startswith("{{") for legend in legends)
