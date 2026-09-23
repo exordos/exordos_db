@@ -227,10 +227,9 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
 
         actual_resources = []
 
-        users = databases = None
-        if self._roles_managed(instance):
-            users = self._get_users(instance)
-            databases = self._get_databases(instance)
+        adopt_roles = not self._roles_managed(instance)
+        users = {} if adopt_roles else self._get_users(instance)
+        databases = {} if adopt_roles else self._get_databases(instance)
 
         backup = self._get_backup(instance)
 
@@ -249,6 +248,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
                     users=users,
                     databases=databases,
                     backup=backup,
+                    adopt_roles=adopt_roles,
                 )
             )
 

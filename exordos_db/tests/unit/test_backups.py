@@ -329,8 +329,8 @@ def test_error_starts_at_its_cause(monkeypatch):
     )
 
 
-def test_backup_is_sent_to_a_node_only_when_set():
-    # The agent of a node created before backups drops the fields it doesn't
+def test_restore_fields_are_sent_to_a_node_only_when_set():
+    # The agent of a node created before them drops the fields it doesn't
     # know and would never match the target hash
     instance = paas_models.PGInstance(
         project_id=uuid.uuid4(),
@@ -361,3 +361,5 @@ def test_backup_is_sent_to_a_node_only_when_set():
     }
     node.backup = {"stanza": "s"}
     assert node.to_ua_resource().value["backup"] == {"stanza": "s"}
+    node.adopt_roles = True
+    assert node.to_ua_resource().value["adopt_roles"] is True

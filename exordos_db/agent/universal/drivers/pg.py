@@ -147,12 +147,8 @@ class PGInstance(meta.MetaDataPlaneModel):
         ra_types.String(min_length=1, max_length=512),
         required=True,
     )
-    # None leaves them unmanaged, e.g. until a restored cluster's are imported.
-    # The default has to be None too: restalchemy replaces a None value with
-    # the default, so any other default would turn "unmanaged" into "empty"
-    # and drop everything the cluster has.
-    databases = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
-    users = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    databases = properties.property(ra_types.Dict(), default={})
+    users = properties.property(ra_types.Dict(), default={})
     nodes_number = properties.property(ra_types.Integer(min_value=1, max_value=16))
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
@@ -162,13 +158,13 @@ class PGInstance(meta.MetaDataPlaneModel):
         default=pc.InstanceStatus.ACTIVE.value,
     )
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
-    # Whether the control plane left the roles unmanaged (users and databases
-    # are None in the target), remembered to report them the same way
-    roles_unmanaged = properties.property(ra_types.Boolean(), default=False)
-    # The roles found on the data plane while they are unmanaged. Not a
-    # target field: it changes the full hash only, which is how the control
-    # plane learns about changes on the data plane, while a differing target
-    # field would make the agent apply the target instead of reporting it.
+    # Sent by the control plane until it has imported the users and databases
+    # of a restored cluster: the agent leaves them alone and reports them
+    adopt_roles = properties.property(ra_types.Boolean(), default=False)
+    # The roles found on the data plane while they are adopted. Not a target
+    # field: it changes the full hash only, which is how the control plane
+    # learns about changes on the data plane, while a differing target field
+    # would make the agent apply the target instead of reporting it.
     found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
     # {"phase": ..., "error": ...} while the restore a new cluster is
     # bootstrapped with is in progress. Not a target field, like found_roles.
@@ -180,7 +176,7 @@ class PGInstance(meta.MetaDataPlaneModel):
         "uuid",
         "name",
         "nodes_number",
-        "roles_unmanaged",
+        "adopt_roles",
     }
 
     def __init__(self, *args, **kwargs):
@@ -191,7 +187,9 @@ class PGInstance(meta.MetaDataPlaneModel):
         return set(self._meta_fields)
 
     def get_resource_ignore_fields(self) -> list[str]:
-        return [*super().get_resource_ignore_fields(), "roles_unmanaged"]
+        # Reported only as it's sent, a node that isn't adopting is as before
+        ignored = super().get_resource_ignore_fields()
+        return ignored if self.adopt_roles else [*ignored, "adopt_roles"]
 
     def _reconcile_target_users(self):
         actual_users = {
@@ -389,7 +387,6 @@ WHERE d.datname not in """
         return False
 
     def dump_to_dp(self) -> None:
-        self.roles_unmanaged = self.users is None
         # Patroni restarts over and over after a failed bootstrap: there is
         # nothing to apply, but the failure has to be reported
         if pgbackrest.load_restore_state() is None or not self._patroni_down():
@@ -420,9 +417,8 @@ WHERE d.datname not in """
         if pgbackrest.remove_restore_config():
             LOG.info("Restore config removed")
 
-        if self.users is not None:
+        if not self.adopt_roles:
             self._reconcile_target_users()
-        if self.databases is not None:
             self._reconcile_target_databases()
         # The stanza has to exist before archiving is turned on
         self._reconcile_DCS(archiving=self._reconcile_backup_stanza())
@@ -460,8 +456,6 @@ WHERE d.datname not in """
         # well be down
         self.restore_state = self._bootstrap_state()
         if self.restore_state is not None:
-            self.users = None
-            self.databases = None
             self.found_roles = None
             return
 
@@ -473,19 +467,16 @@ WHERE d.datname not in """
         self._fill_DCS(config)
         self._fill_backup(config)
 
-        if self.roles_unmanaged:
+        self.found_roles = None
+        if self.adopt_roles:
             # PostgreSQL serves reads while the restore still replays WAL,
             # with the roles as of the replayed moment: only those of the
             # promoted primary are the ones of the recovery target
-            self.found_roles = (
-                {"users": self.users, "databases": self.databases}
-                if self._recovery_over()
-                else None
-            )
-            self.users = None
-            self.databases = None
-        else:
-            self.found_roles = None
+            if self._recovery_over():
+                self.found_roles = {"users": self.users, "databases": self.databases}
+            # What the control plane sends until it has imported them
+            self.users = {}
+            self.databases = {}
 
     def _recovery_over(self) -> bool:
         if not self.c.pclient.is_primary(get_ttl_hash(seconds=20)):

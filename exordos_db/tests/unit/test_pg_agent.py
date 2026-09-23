@@ -21,59 +21,48 @@ import requests
 
 from exordos_db.agent.universal.drivers import pg
 
-UNMANAGED_ROLES = {
+ADOPTING = {
     "uuid": str(uuid.uuid4()),
     "name": "restored",
     "nodes_number": 2,
     "sync_replica_number": 0,
-    "users": None,
-    "databases": None,
-    "backup": None,
+    "users": {},
+    "databases": {},
+    "adopt_roles": True,
 }
 
 
-def test_unmanaged_roles_stay_unmanaged():
-    # A restored cluster's roles aren't imported yet. Turning None into an
-    # empty dict made the agent drop every database of the restored cluster.
-    resource = ua_models.Resource.from_value(UNMANAGED_ROLES, "pg_instance_node")
+def test_adopt_roles_is_reported_only_while_sent():
+    # A node that isn't adopting reports what it did before the flag
+    adopting = pg.PGInstance.from_ua_resource(
+        ua_models.Resource.from_value(ADOPTING, "pg_instance_node")
+    )
+    managed = pg.PGInstance.from_ua_resource(
+        ua_models.Resource.from_value(
+            {k: v for k, v in ADOPTING.items() if k != "adopt_roles"},
+            "pg_instance_node",
+        )
+    )
 
-    instance = pg.PGInstance.from_ua_resource(resource)
-
-    assert instance.users is None
-    assert instance.databases is None
+    assert adopting.to_ua_resource("pg_instance_node").value["adopt_roles"]
+    assert "adopt_roles" not in managed.to_ua_resource("pg_instance_node").value
+    assert "adopt_roles" in adopting.get_meta_fields()
 
 
 def test_found_roles_change_the_full_hash_only():
     # The agent reports a resource read from the data plane only while its
     # target hash matches; the control plane learns about the data plane
     # from the full hash. The found roles have to travel that way.
-    resource = ua_models.Resource.from_value(UNMANAGED_ROLES, "pg_instance_node")
+    resource = ua_models.Resource.from_value(ADOPTING, "pg_instance_node")
     empty = pg.PGInstance.from_ua_resource(resource)
     found = pg.PGInstance.from_ua_resource(resource)
     found.found_roles = {"users": {"app": {"pw_hash": "x"}}, "databases": {}}
-    found.roles_unmanaged = True
 
     empty_resource = empty.to_ua_resource("pg_instance_node")
     found_resource = found.to_ua_resource("pg_instance_node")
 
     assert found_resource.hash == empty_resource.hash
     assert found_resource.full_hash != empty_resource.full_hash
-    assert "roles_unmanaged" not in found_resource.value
-    assert "roles_unmanaged" in found.get_meta_fields()
-
-
-def test_managed_roles():
-    value = {
-        **UNMANAGED_ROLES,
-        "users": {"app": {"pw_hash": "SCRAM-SHA-256$..."}},
-        "databases": {},
-    }
-    resource = ua_models.Resource.from_value(value, "pg_instance_node")
-
-    instance = pg.PGInstance.from_ua_resource(resource)
-
-    assert instance.users == {"app": {"pw_hash": "SCRAM-SHA-256$..."}}
-    assert instance.databases == {}
 
 
 class FakeCursor:
@@ -144,9 +133,8 @@ class FakeClients:
 
 def _restored_node(psql, pclient, monkeypatch, restore_state=None):
     FakeRepository(monkeypatch, restore_state=restore_state)
-    resource = ua_models.Resource.from_value(UNMANAGED_ROLES, "pg_instance_node")
+    resource = ua_models.Resource.from_value(ADOPTING, "pg_instance_node")
     instance = pg.PGInstance.from_ua_resource(resource)
-    instance.roles_unmanaged = True
     instance.c = FakeClients(psql, pclient)
     return instance
 
@@ -167,8 +155,8 @@ def test_roles_are_found_once_the_recovery_is_over(monkeypatch):
         "users": {"app": {"pw_hash": "SCRAM-SHA-256$..."}},
         "databases": {"app": {"owner": "app"}},
     }
-    assert instance.users is None
-    assert instance.databases is None
+    assert instance.users == {}
+    assert instance.databases == {}
 
 
 def test_roles_of_a_cluster_in_recovery_are_not_found(monkeypatch):
@@ -181,8 +169,8 @@ def test_roles_of_a_cluster_in_recovery_are_not_found(monkeypatch):
     instance.restore_from_dp()
 
     assert instance.found_roles is None
-    assert instance.users is None
-    assert instance.databases is None
+    assert instance.users == {}
+    assert instance.databases == {}
 
 
 def test_roles_of_a_replica_are_not_found(monkeypatch):
@@ -258,7 +246,8 @@ class FakeRepository:
 
 def _managed_node(psql, pclient, backup):
     value = {
-        **UNMANAGED_ROLES,
+        **ADOPTING,
+        "adopt_roles": False,
         "users": {"app": {"pw_hash": "SCRAM-SHA-256$..."}},
         "databases": {"app": {"owner": "app"}},
         "sync_replica_number": 1,
@@ -398,8 +387,7 @@ def test_failed_bootstrap_is_reported_by_the_update_too(monkeypatch):
     FakeRepository(monkeypatch, restore_state=FAILED)
     psql = FakePsql()
     instance = _managed_node(psql, FakePatroni(down=True), None)
-    instance.users = None
-    instance.databases = None
+    instance.adopt_roles = True
 
     instance.dump_to_dp()
 

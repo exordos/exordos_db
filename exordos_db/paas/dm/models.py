@@ -40,16 +40,18 @@ class PGInstanceNode(
     )
     # TODO(akremenetsky): We already have name in the parent model
     name = properties.property(ra_types.String(min_length=1, max_length=64))
-    # None leaves them unmanaged, see PGInstance.roles_imported
-    databases = properties.property(ra_types.AllowNone(ra_types.Dict()))
-    users = properties.property(ra_types.AllowNone(ra_types.Dict()))
+    databases = properties.property(ra_types.Dict())
+    users = properties.property(ra_types.Dict())
     nodes_number = properties.property(ra_types.Integer(min_value=1, max_value=16))
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
     )
     # pgBackRest spec, see exordos_db.common.pgbackrest
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
-    # Reported by the agent while the roles are unmanaged, not a target field
+    # Until the users and databases of a restored cluster are imported: the
+    # agent leaves them alone and reports them in found_roles, not a target
+    # field
+    adopt_roles = properties.property(ra_types.Boolean(), default=False)
     found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
     # Reported by the agent while the restore is in progress, not a target
     # field
@@ -75,10 +77,12 @@ class PGInstanceNode(
             "databases",
             "users",
         }
-        # Only when set: the agent of a node created before backups would
-        # never match the target hash, to a newer one missing is None
+        # Only when set: the agent of a node created before them would never
+        # match the target hash, to a newer one missing is the default
         if self.backup is not None:
             fields.add("backup")
+        if self.adopt_roles:
+            fields.add("adopt_roles")
         return frozenset(fields)
 
 

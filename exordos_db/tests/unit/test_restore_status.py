@@ -23,6 +23,7 @@ import pytest
 from exordos_db.infra.services import builder as infra_builder
 from exordos_db.paas.dm import models as paas_models
 from exordos_db.paas.services import builder as paas_builder
+from exordos_db.user_api.api import controllers
 from exordos_db.user_api.dm import backups
 from exordos_db.user_api.dm import models
 
@@ -135,3 +136,17 @@ def test_import_of_roles_keeps_the_rows_there_are(monkeypatch):
     ]
     assert inserted[1].owner is app
     assert instance.roles_imported
+
+
+@pytest.mark.parametrize(
+    ("call", "kwargs"),
+    [
+        ("create", {"parent_resource": None, "name": "app"}),
+        ("create", {"parent_resource": None, "name": "app", "password": None}),
+        ("update", {"parent_resource": None, "uuid": None, "password": None}),
+    ],
+)
+def test_api_asks_for_a_password(call, kwargs):
+    # Only users imported from a restored cluster have none
+    with pytest.raises(controllers.PasswordRequiredError):
+        getattr(controllers.PGUserController, call)(None, **kwargs)
