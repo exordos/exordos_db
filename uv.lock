@@ -601,7 +601,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.15.2" },
     { name = "gcl-iam", specifier = ">=1.4.0,<2.0.0" },
     { name = "gcl-looper", specifier = ">=1.2.3,<2.0.0" },
-    { name = "gcl-sdk", specifier = "==3.6.1" },
+    { name = "gcl-sdk", specifier = "==3.6.3" },
     { name = "mkdocs-glightbox", marker = "extra == 'docs'" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = "==9.7.7" },
     { name = "mkdocs-render-swagger-plugin", marker = "extra == 'docs'" },
@@ -663,7 +663,7 @@ wheels = [
 
 [[package]]
 name = "gcl-sdk"
-version = "3.6.1"
+version = "3.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bjoern" },
@@ -677,9 +677,9 @@ dependencies = [
     { name = "restalchemy" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/1f/4019cc7476e279435c0f81561028539cb8afc8fc98a20957a81d3624e571/gcl_sdk-3.6.1.tar.gz", hash = "sha256:677982e095acfc5eb1a34817e7c2dd4f525f027e6a0a9360597c99d78dcd2abc", size = 363481, upload-time = "2026-09-09T10:07:51.55Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/01/2aafa46c9a0f1e9268cfed6337f254d79512f7c8b5e2ecaf5b9176eb6bf8/gcl_sdk-3.6.3.tar.gz", hash = "sha256:a45b7a931dae1539a362de8b50fd73413152bfc12f9373e47bdf164dd246ea99", size = 366265, upload-time = "2026-09-23T11:25:06.253Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/c4/b2f455c71a03d47e347f88aa97dd393bedff2ec0427a569bb99d4a47dd82/gcl_sdk-3.6.1-py3-none-any.whl", hash = "sha256:3cb0fa077a0e7c20c28f8f2db6aa0e77cb77c8a926bc9722f28e139e21375d2d", size = 316725, upload-time = "2026-09-09T10:07:49.749Z" },
+    { url = "https://files.pythonhosted.org/packages/53/0b/1ac9b8671f29fd1011fb2f99338ddc1f8154b7cfbb7413eafbe7dc9ecb54/gcl_sdk-3.6.3-py3-none-any.whl", hash = "sha256:2378613e9b234f8400ce238792d7e6883709cb9519fbe4909b26cd9d484e2a12", size = 318994, upload-time = "2026-09-23T11:25:04.863Z" },
 ]
 
 [[package]]

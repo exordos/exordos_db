@@ -102,13 +102,24 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         databases = self._get_databases(instance)
 
         nodeset = instance.get_actual_nodeset()
-        nodes_by_idx = list(nodeset.nodes.keys())
+        # The nodeset may still be provisioning (fewer nodes than requested)
+        # or shrinking (more nodes than requested). Build derivatives only
+        # for existing nodes, the rest will be added on nodeset update.
+        node_uuids = list(nodeset.nodes.keys())[: instance.nodes_number]
+        if len(node_uuids) < instance.nodes_number:
+            LOG.info(
+                "Nodeset %s has %d of %d nodes for instance %s, waiting",
+                nodeset.uuid,
+                len(node_uuids),
+                instance.nodes_number,
+                instance.uuid,
+            )
 
         # Just recreate entities, it'll be updated in DB if already exist
-        for i in range(instance.nodes_number):
+        for node_uuid in node_uuids:
             actual_resources.append(
                 models.PGInstanceNode(
-                    uuid=PaaSBuilder.agent_uuid_by_node(uuid.UUID(nodes_by_idx[i])),
+                    uuid=PaaSBuilder.agent_uuid_by_node(uuid.UUID(node_uuid)),
                     name=instance.name,
                     instance=instance,
                     nodes_number=instance.nodes_number,
@@ -119,3 +130,12 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             )
 
         return actual_resources
+
+    def actualize_paas_objects_source_master(
+        self,
+        instance: models.PGInstance,
+        master_instance: ua_models.InstanceWithDerivativesMixin,
+        paas_collection: builder.PaaSCollection,
+    ) -> tp.Collection[ua_models.TargetResourceKindAwareMixin]:
+        """Rebuild derivatives when the nodeset changes (e.g. nodes appear)."""
+        return self.actualize_paas_objects(instance, paas_collection)
