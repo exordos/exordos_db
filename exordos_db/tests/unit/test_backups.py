@@ -278,8 +278,11 @@ class TestChooseBackupType:
     def test_no_backups(self):
         assert self._choose([]) == "full"
 
-    def test_only_failed_full(self):
-        assert self._choose([_backup("full", self.now - HOUR, error=True)]) == "full"
+    def test_backup_with_page_errors_counts(self):
+        # pgBackRest lists only backups that succeeded, `error` flags pages
+        # with checksum errors: taking another backup wouldn't fix them and
+        # the retention would expire the backups from before
+        assert self._choose([_backup("full", self.now - HOUR, error=True)]) is None
 
     def test_full_expired(self):
         backups = [
@@ -292,13 +295,6 @@ class TestChooseBackupType:
         backups = [
             _backup("full", self.now - 48 * HOUR),
             _backup("incr", self.now - 24 * HOUR),
-        ]
-        assert self._choose(backups) == "incr"
-
-    def test_failed_incr_doesnt_count(self):
-        backups = [
-            _backup("full", self.now - 30 * HOUR),
-            _backup("incr", self.now - HOUR, error=True),
         ]
         assert self._choose(backups) == "incr"
 

@@ -244,21 +244,21 @@ def restore_args(spec: dict[str, tp.Any]) -> list[str]:
 
 
 def choose_backup_type(
-    backups: tp.Iterable[dict[str, tp.Any]],
+    backups: list[dict[str, tp.Any]],
     schedule: dict[str, int],
     now: float,
 ) -> str | None:
     """Decide which backup is due, if any.
 
-    `backups` is the `backup` list of `pgbackrest info --output=json`.
+    `backups` is the `backup` list of `pgbackrest info --output=json`: a
+    failed backup isn't there, `error` only flags pages with checksum errors
+    in a backup that restores all the same.
     """
-    done = [b for b in backups if not b.get("error")]
-
-    fulls = [b["timestamp"]["stop"] for b in done if b["type"] == "full"]
+    fulls = [b["timestamp"]["stop"] for b in backups if b["type"] == "full"]
     if not fulls or now - max(fulls) >= schedule["full_interval_hours"] * 3600:
         return "full"
 
-    last = max(b["timestamp"]["stop"] for b in done)
+    last = max(b["timestamp"]["stop"] for b in backups)
     if now - last >= schedule["incr_interval_hours"] * 3600:
         return "incr"
 
