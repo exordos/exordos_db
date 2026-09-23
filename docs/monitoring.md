@@ -203,14 +203,25 @@ sum by (exordos_db_instance, datname, schemaname, relname) (
 )
 ```
 
-## Dashboard
+## Dashboards
 
-The `dbaas_dashboard` element puts a **PostgreSQL instance** dashboard into the
-**DBaaS** folder of the shared observability Grafana, per project and
-instance: primaries, role of each node, replication lag, disk fullness,
-database and `pg_wal` sizes, sessions, transactions, cache hit ratio, and the
-Patroni and PostgreSQL logs with the error rate. It depends on the
+The `dbaas_dashboard` element puts the dashboards into the **DBaaS** folder of
+the shared observability Grafana, per project and instance. It depends on the
 `observability` element; install it after that one.
+
+- **PostgreSQL instance**: primaries, role of each node, replication lag and
+  slots, oldest transaction, transaction ID age, locks, deadlocks and
+  conflicts, sessions, transactions, rows, temporary files, checkpoints, WAL
+  archiving, disks, CPU, memory and network of the nodes, the main settings,
+  and the Patroni and PostgreSQL logs with the error rate.
+- **PostgreSQL tables**: every table of the chosen databases with its size,
+  rows, dead rows, scans and last autovacuum, the largest tables, dead row
+  share, writes, sequential scans, cache hit ratio and vacuums.
+
+Every engine gets dashboards of its own, the metrics differ. Their uids are
+`exordos-dbaas-<engine>-<view>` and their tags `dbaas` and the engine; the
+links in the header lead to the other dashboards of the engine, the chosen
+instance and time range carried over.
 
 ## Notes
 

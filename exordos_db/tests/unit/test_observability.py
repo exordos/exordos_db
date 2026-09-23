@@ -175,22 +175,46 @@ def test_database_exporter_only_collects_per_table_statistics():
         assert f"--no-collector.{collector}" not in main_args
 
 
-def _dashboard() -> dict:
+def _resources() -> dict:
     manifest = (ROOT / "exordos/manifests/dbaas_dashboard.yaml.j2").read_text()
     # The only Jinja in it: the version and the string literals of legends
     rendered = re.sub(
-        r"\{\{ '(\{\{\w+\}\})' \}\}",
+        r"\{\{ '([^'\n]*)' \}\}",
         r"\1",
         manifest.replace("{{ version }}", "0.0.0"),
     )
-    resources = yaml.safe_load(rendered)["resources"]
-    return resources["$grafanaaas.types.grafana.dashboards"]["dbaas"]["source"][
-        "content"
-    ]
+    return yaml.safe_load(rendered)["resources"]
+
+
+def _dashboards() -> dict[str, dict]:
+    resources = _resources()["$grafanaaas.types.grafana.dashboards"]
+    return {name: r["source"]["content"] for name, r in resources.items()}
+
+
+def _panels():
+    for dashboard in _dashboards().values():
+        for panel in dashboard["panels"]:
+            if panel["type"] != "row":
+                yield panel
+
+
+def test_dashboards_are_grouped_by_engine():
+    dashboards = _dashboards()
+    bindings = _resources()["$dbaas_dashboard.imports.$grafana_instance.dashboards"]
+
+    assert set(dashboards) == {"postgres_instance", "postgres_tables"}
+    for dashboard in dashboards.values():
+        assert dashboard["uid"].startswith("exordos-dbaas-postgres-")
+        assert dashboard["tags"] == ["dbaas", "postgresql"]
+        assert dashboard["links"][0]["tags"] == ["dbaas", "postgresql"]
+        variables = {v["name"]: v for v in dashboard["templating"]["list"]}
+        assert 'exordos_db_type="postgres"' in variables["project"]["definition"]
+    assert {b["name"] for b in bindings.values()} == set(dashboards)
+    assert {b["folder"] for b in bindings.values()} == {"DBaaS"}
 
 
 def test_dashboard_panels_select_the_chosen_instance():
-    panels = [p for p in _dashboard()["panels"] if p["type"] != "row"]
+    panels = list(_panels())
 
     for panel in panels:
         for target in panel["targets"]:
@@ -204,9 +228,8 @@ def test_dashboard_panels_select_the_chosen_instance():
     assert {p["datasource"]["type"] for p in logs} == {
         "victoriametrics-logs-datasource"
     }
-    assert {p["datasource"]["uid"] for p in logs} == {
-        "$dbaas_dashboard.imports.$logs_datasource:uuid"
-    }
+    # By name: the observability element doesn't export the datasource
+    assert {p["datasource"]["uid"] for p in logs} == {"victoria-logs"}
 
 
 def _strings(value):
@@ -223,18 +246,28 @@ def _strings(value):
 def test_dashboard_leaves_values_starting_with_dollar_to_manifest_links():
     # The element manager renders such a value as a link, a Grafana ${var}
     # there stops it
-    starting = {s for s in _strings(_dashboard()) if s.startswith("$")}
+    starting = {s for s in _strings(_dashboards()) if s.startswith("$")}
 
-    assert starting == {"$dbaas_dashboard.imports.$logs_datasource:uuid"}
+    assert starting == set()
+
+
+def test_dashboard_imports_only_what_the_observability_element_exports():
+    manifest = (ROOT / "exordos/manifests/dbaas_dashboard.yaml.j2").read_text()
+    imports = yaml.safe_load(manifest.replace("{{ version }}", "0"))["imports"]
+
+    # The element manager refuses the whole element otherwise
+    assert {i["link"] for i in imports.values()} == {
+        "$grafanaaas.types.grafana.instances.$grafana"
+    }
 
 
 def test_dashboard_legends_survive_the_manifest_template():
     legends = {
         t["legendFormat"]
-        for p in _dashboard()["panels"]
+        for p in _panels()
         for t in p.get("targets", ())
         if t.get("legendFormat")
     }
 
     assert "{{instance}}" in legends
-    assert all("{{" not in legend or legend.startswith("{{") for legend in legends)
+    assert "{{datname}}.{{schemaname}}.{{relname}}" in legends
