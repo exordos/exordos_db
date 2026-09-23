@@ -24,7 +24,9 @@ import yaml
 
 from exordos_db.common import pgbackrest
 from exordos_db.infra.services import builder as infra_builder
+from exordos_db.paas.dm import models as paas_models
 from exordos_db.user_api.dm import backups
+from exordos_db.user_api.dm import models
 
 HOUR = 3600
 
@@ -288,3 +290,37 @@ class TestChooseBackupType:
             _backup("diff", self.now - 2 * HOUR),
         ]
         assert self._choose(backups) is None
+
+
+def test_backup_is_sent_to_a_node_only_when_set():
+    # The agent of a node created before backups drops the fields it doesn't
+    # know and would never match the target hash
+    instance = paas_models.PGInstance(
+        project_id=uuid.uuid4(),
+        name="old",
+        cpu=1,
+        ram=1024,
+        disk_size=8,
+        nodes_number=1,
+        version=models.PGVersion(name="18", image="pg.raw"),
+    )
+    node = paas_models.PGInstanceNode(
+        uuid=uuid.uuid4(),
+        name="old",
+        instance=instance,
+        nodes_number=1,
+        sync_replica_number=0,
+        users={},
+        databases={},
+    )
+
+    assert set(node.to_ua_resource().value) == {
+        "uuid",
+        "name",
+        "nodes_number",
+        "sync_replica_number",
+        "users",
+        "databases",
+    }
+    node.backup = {"stanza": "s"}
+    assert node.to_ua_resource().value["backup"] == {"stanza": "s"}

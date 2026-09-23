@@ -132,6 +132,12 @@ backups with [pgBackRest](https://pgbackrest.org/). The storage is described
 in full by the user: DBaaS neither creates buckets nor manages credentials, so
 the S3 lifecycle belongs to manifests and other elements.
 
+Updating the DBaaS element doesn't reinstall the nodes of existing instances
+at once. They keep the agent they were created with, which doesn't know
+backups, until the first change of the instance reinstalls them from the new
+image, keeping the data disk. Setting `backup` is such a change, so backups
+are taken by the reinstalled nodes.
+
 ```json
 {
   "backup": {
@@ -174,6 +180,9 @@ Patroni DCS. `exordos-db-pg-backup.timer` runs every 15 minutes on every node
 and takes a backup on the primary when one is due. When the storage is
 unreachable WAL is kept up to a quarter of `disk_size` and dropped after that,
 so the database keeps running at the cost of a gap in point-in-time recovery.
+Archiving is turned on only once the stanza is created; until then users,
+databases and replication settings are applied as usual, and the agent keeps
+retrying.
 
 ## Restoring to a Point in Time
 

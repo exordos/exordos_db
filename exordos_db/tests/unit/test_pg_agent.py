@@ -179,3 +179,166 @@ def test_roles_of_a_replica_are_not_found(monkeypatch):
     instance.restore_from_dp()
 
     assert instance.found_roles is None
+
+
+SPEC = {"stanza": str(uuid.uuid4()), "options": {"repo1-type": "s3"}}
+
+
+class FakeRepository:
+    """pgbackrest of the agent: files on the node and the repository."""
+
+    def __init__(self, monkeypatch, reachable=True, stanza_ready=False, spec=None):
+        self.reachable = reachable
+        self.ready = stanza_ready
+        self.spec = spec
+        self.calls = []
+        for name in (
+            "apply_spec",
+            "mark_stanza_ready",
+            "stanza_ready",
+            "run",
+            "remove_restore_config",
+            "load_spec",
+        ):
+            monkeypatch.setattr(pg.pgbackrest, name, getattr(self, name))
+
+    def apply_spec(self, spec):
+        self.calls.append(("apply_spec", spec))
+        return False
+
+    def mark_stanza_ready(self, spec):
+        self.ready = spec is not None
+
+    def stanza_ready(self, spec):
+        return self.ready
+
+    def run(self, stanza, *args, timeout=None):
+        self.calls.append(("run", args))
+        if not self.reachable:
+            raise pg.pgbackrest.PgBackRestError("stanza-create failed")
+        return ""
+
+    def remove_restore_config(self):
+        return False
+
+    def load_spec(self):
+        return self.spec
+
+
+def _managed_node(psql, pclient, backup):
+    value = {
+        **UNMANAGED_ROLES,
+        "users": {"app": {"pw_hash": "SCRAM-SHA-256$..."}},
+        "databases": {"app": {"owner": "app"}},
+        "sync_replica_number": 1,
+        "backup": backup,
+    }
+    resource = ua_models.Resource.from_value(value, "pg_instance_node")
+    instance = pg.PGInstance.from_ua_resource(resource)
+    instance.c = FakeClients(psql, pclient)
+    return instance
+
+
+def test_unreachable_repository_holds_nothing_else(monkeypatch):
+    repository = FakeRepository(monkeypatch, reachable=False)
+    psql = FakePsql()
+    patroni = FakePatroni(primary=True)
+    instance = _managed_node(psql, patroni, SPEC)
+
+    instance.dump_to_dp()
+
+    # Users, databases and replication are applied, archiving isn't
+    # touched until the stanza exists
+    assert any("CREATE USER" in q for q in psql.executed)
+    assert any("CREATE DATABASE" in q for q in psql.executed)
+    assert patroni.patches == [
+        {
+            "synchronous_mode": True,
+            "synchronous_mode_strict": True,
+            "synchronous_node_count": 1,
+        }
+    ]
+    assert not repository.ready
+
+
+def test_archiving_is_turned_on_after_the_stanza(monkeypatch):
+    repository = FakeRepository(monkeypatch)
+    patroni = FakePatroni(primary=True)
+    instance = _managed_node(FakePsql(), patroni, SPEC)
+
+    instance.dump_to_dp()
+
+    assert ("run", ("stanza-create",)) in repository.calls
+    assert repository.ready
+    [patch] = patroni.patches
+    assert patch["postgresql"]["parameters"]["archive_command"] == (
+        pg.pgbackrest.archive_command(SPEC)
+    )
+
+
+def test_archiving_stops_before_the_config_is_removed(monkeypatch):
+    repository = FakeRepository(monkeypatch, stanza_ready=True)
+    patroni = FakePatroni(primary=True)
+    events = []
+    patroni.config_patch = lambda config: events.append(("patch", config))
+    repository.apply_spec = lambda spec: events.append(("apply_spec", spec))
+    monkeypatch.setattr(pg.pgbackrest, "apply_spec", repository.apply_spec)
+    instance = _managed_node(FakePsql(), patroni, None)
+
+    instance.dump_to_dp()
+
+    kinds = [kind for kind, _ in events]
+    assert kinds.index("patch") < kinds.index("apply_spec")
+    assert events[0][1]["postgresql"]["parameters"]["archive_command"] == (
+        pg.pgbackrest.archive_command(None)
+    )
+
+
+def test_replica_leaves_the_repository_and_roles_alone(monkeypatch):
+    repository = FakeRepository(monkeypatch)
+    psql = FakePsql()
+    patroni = FakePatroni(primary=False)
+    instance = _managed_node(psql, patroni, SPEC)
+
+    instance.dump_to_dp()
+
+    # Every node keeps the config, only the primary talks to the repository
+    assert repository.calls == [("apply_spec", SPEC)]
+    assert patroni.patches == []
+    assert psql.executed == []
+
+
+def _archiving_config(spec):
+    return {
+        "synchronous_node_count": 0,
+        "postgresql": {
+            "parameters": {"archive_command": pg.pgbackrest.archive_command(spec)}
+        },
+    }
+
+
+def test_backup_settles_once_archiving_and_stanza_are_in_place(monkeypatch):
+    FakeRepository(monkeypatch, stanza_ready=True, spec=SPEC)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), SPEC)
+
+    instance._fill_backup(_archiving_config(SPEC))
+
+    assert instance.backup == SPEC
+
+
+def test_backup_is_unsettled_without_the_stanza_on_the_primary(monkeypatch):
+    FakeRepository(monkeypatch, stanza_ready=False, spec=SPEC)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), SPEC)
+
+    instance._fill_backup(_archiving_config(SPEC))
+
+    assert instance.backup == pg.BACKUP_UNSETTLED
+
+
+def test_backup_is_unsettled_until_archiving_is_on(monkeypatch):
+    FakeRepository(monkeypatch, stanza_ready=True, spec=SPEC)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), SPEC)
+
+    instance._fill_backup(_archiving_config(None))
+
+    assert instance.backup == pg.BACKUP_UNSETTLED

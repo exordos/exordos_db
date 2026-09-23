@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from functools import wraps
 import logging
+import subprocess
 import time
 import typing as tp
 
@@ -43,6 +44,10 @@ PG_SYSTEM_DATABASES_TMPL = "('postgres', 'template0', 'template1')"
 # Reported instead of the backup spec while the data plane hasn't converged
 # to it yet, so the agent keeps applying the spec
 BACKUP_UNSETTLED = {"state": "unsettled"}
+
+# stanza-create talks to the repository on every iteration until it
+# succeeds, the rest of the node waits for it meanwhile
+STANZA_CREATE_TIMEOUT = 60
 
 
 def get_ttl_hash(seconds=600):
@@ -303,34 +308,50 @@ WHERE d.datname not in """
         for aname, aowner in actual_dbs.items():
             self.databases[aname] = {"owner": aowner}
 
-    def _reconcile_DCS(self):
+    def _reconcile_DCS(self, archiving: bool = True) -> None:
         sync_enabled = self.nodes_number > 1 and self.sync_replica_number
-        tconfig = {
+        tconfig: dict[str, tp.Any] = {
             "synchronous_mode": bool(sync_enabled),
             "synchronous_mode_strict": bool(sync_enabled),
             "synchronous_node_count": self.sync_replica_number,
-            "postgresql": {
+        }
+        # Left as it is otherwise: a primary that can't reach the
+        # repository keeps archiving as it did, WAL waits in pg_wal
+        if archiving:
+            tconfig["postgresql"] = {
                 "parameters": {
                     "archive_command": pgbackrest.archive_command(self.backup),
                 },
-            },
-        }
+            }
         LOG.info("DCS patch: %s", tconfig)
         self.c.pclient.config_patch(tconfig)
 
     def _fill_DCS(self, config: dict[str, tp.Any]) -> None:
         self.sync_replica_number = config["synchronous_node_count"]
 
-    def _reconcile_backup_stanza(self) -> None:
+    def _reconcile_backup_stanza(self) -> bool:
+        """Create the stanza, return whether archiving may be set up."""
         # Idempotent, but talks to the repository, so run it only when the
         # repository changed or this node hasn't created the stanza yet
         # (e.g. it has just become the primary)
         if self.backup is None or pgbackrest.stanza_ready(self.backup):
-            return
+            return True
 
-        pgbackrest.run(self.backup["stanza"], "stanza-create")
+        try:
+            pgbackrest.run(
+                self.backup["stanza"],
+                "stanza-create",
+                timeout=STANZA_CREATE_TIMEOUT,
+            )
+        except (pgbackrest.PgBackRestError, subprocess.TimeoutExpired):
+            # The repository doesn't hold the rest of the node up; the
+            # backup stays unsettled, so this is retried
+            LOG.exception("Failed to create stanza %s", self.backup["stanza"])
+            return False
+
         pgbackrest.mark_stanza_ready(self.backup)
         LOG.info("Stanza %s created", self.backup["stanza"])
+        return True
 
     def _fill_backup(self, config: dict[str, tp.Any]) -> None:
         spec = pgbackrest.load_spec()
@@ -369,13 +390,12 @@ WHERE d.datname not in """
         if pgbackrest.remove_restore_config():
             LOG.info("Restore config removed")
 
-        # The stanza has to exist before archiving is turned on
-        self._reconcile_backup_stanza()
-        self._reconcile_DCS()
         if self.users is not None:
             self._reconcile_target_users()
         if self.databases is not None:
             self._reconcile_target_databases()
+        # The stanza has to exist before archiving is turned on
+        self._reconcile_DCS(archiving=self._reconcile_backup_stanza())
 
     def restore_from_dp(self) -> None:
         self.users = {}

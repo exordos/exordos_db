@@ -62,17 +62,19 @@ class PGInstanceNode(
 
         Refer to the Resource model for more details about target fields.
         """
-        return frozenset(
-            (
-                "uuid",
-                "name",
-                "sync_replica_number",
-                "nodes_number",
-                "databases",
-                "users",
-                "backup",
-            )
-        )
+        fields = {
+            "uuid",
+            "name",
+            "sync_replica_number",
+            "nodes_number",
+            "databases",
+            "users",
+        }
+        # Only when set: the agent of a node created before backups would
+        # never match the target hash, to a newer one missing is None
+        if self.backup is not None:
+            fields.add("backup")
+        return frozenset(fields)
 
 
 class PGInstance(
