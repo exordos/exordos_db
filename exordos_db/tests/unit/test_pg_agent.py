@@ -17,6 +17,7 @@
 import uuid
 
 from gcl_sdk.agents.universal.dm import models as ua_models
+import requests
 
 from exordos_db.agent.universal.drivers import pg
 
@@ -108,12 +109,24 @@ class FakePsql:
 
 
 class FakePatroni:
-    def __init__(self, primary=True):
+    member_name = "node-a"
+
+    def __init__(self, primary=True, down=False, leader=None):
         self.primary = primary
+        self.down = down
+        self.leader = leader
         self.patches = []
 
     def is_primary(self, ttl_hash=None):
+        if self.down:
+            raise requests.ConnectionError("Patroni is restarting")
         return self.primary
+
+    def cluster(self):
+        members = [{"name": self.member_name, "role": "replica"}]
+        if self.leader is not None:
+            members.append({"name": self.leader, "role": "leader"})
+        return {"members": members}
 
     def config_get(self):
         return {"synchronous_node_count": 0, "postgresql": {"parameters": {}}}
@@ -129,8 +142,8 @@ class FakeClients:
         self.pclient = pclient
 
 
-def _restored_node(psql, pclient, monkeypatch):
-    monkeypatch.setattr(pg.pgbackrest, "load_spec", lambda: None)
+def _restored_node(psql, pclient, monkeypatch, restore_state=None):
+    FakeRepository(monkeypatch, restore_state=restore_state)
     resource = ua_models.Resource.from_value(UNMANAGED_ROLES, "pg_instance_node")
     instance = pg.PGInstance.from_ua_resource(resource)
     instance.roles_unmanaged = True
@@ -187,10 +200,18 @@ SPEC = {"stanza": str(uuid.uuid4()), "options": {"repo1-type": "s3"}}
 class FakeRepository:
     """pgbackrest of the agent: files on the node and the repository."""
 
-    def __init__(self, monkeypatch, reachable=True, stanza_ready=False, spec=None):
+    def __init__(
+        self,
+        monkeypatch,
+        reachable=True,
+        stanza_ready=False,
+        spec=None,
+        restore_state=None,
+    ):
         self.reachable = reachable
         self.ready = stanza_ready
         self.spec = spec
+        self.restore_state = restore_state
         self.calls = []
         for name in (
             "apply_spec",
@@ -199,6 +220,8 @@ class FakeRepository:
             "run",
             "remove_restore_config",
             "load_spec",
+            "load_restore_state",
+            "remove_restore_state",
         ):
             monkeypatch.setattr(pg.pgbackrest, name, getattr(self, name))
 
@@ -223,6 +246,14 @@ class FakeRepository:
 
     def load_spec(self):
         return self.spec
+
+    def load_restore_state(self):
+        return self.restore_state
+
+    def remove_restore_state(self):
+        removed = self.restore_state is not None
+        self.restore_state = None
+        return removed
 
 
 def _managed_node(psql, pclient, backup):
@@ -342,3 +373,58 @@ def test_backup_is_unsettled_until_archiving_is_on(monkeypatch):
     instance._fill_backup(_archiving_config(None))
 
     assert instance.backup == pg.BACKUP_UNSETTLED
+
+
+FAILED = {"source": ["s", None], "attempts": 3, "phase": "failed", "error": "boom"}
+
+
+def test_failed_bootstrap_is_reported_while_patroni_is_down(monkeypatch):
+    psql = FakePsql()
+    instance = _restored_node(
+        psql, FakePatroni(down=True), monkeypatch, restore_state=FAILED
+    )
+
+    instance.restore_from_dp()
+
+    # PostgreSQL isn't asked, it isn't there
+    assert instance.restore_state == {"phase": "failed", "error": "boom"}
+    assert instance.found_roles is None
+    assert psql.executed == []
+
+
+def test_failed_bootstrap_is_reported_by_the_update_too(monkeypatch):
+    # The agent reports the target it applied to a node that hasn't
+    # converged, not what it reads back
+    FakeRepository(monkeypatch, restore_state=FAILED)
+    psql = FakePsql()
+    instance = _managed_node(psql, FakePatroni(down=True), None)
+    instance.users = None
+    instance.databases = None
+
+    instance.dump_to_dp()
+
+    assert instance.restore_state == {"phase": "failed", "error": "boom"}
+    assert psql.executed == []
+
+
+def test_promoted_primary_drops_the_bootstrap_state(monkeypatch):
+    repository = FakeRepository(monkeypatch, restore_state=FAILED)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), None)
+
+    instance.restore_from_dp()
+
+    assert instance.restore_state is None
+    assert repository.restore_state is None
+
+
+def test_replica_of_another_bootstrap_drops_its_failed_one(monkeypatch):
+    # Another node bootstrapped the cluster after this one failed to
+    repository = FakeRepository(monkeypatch, restore_state=FAILED)
+    instance = _managed_node(
+        FakePsql(in_recovery=True), FakePatroni(primary=False, leader="node-b"), None
+    )
+
+    instance.restore_from_dp()
+
+    assert instance.restore_state is None
+    assert repository.restore_state is None

@@ -207,7 +207,7 @@ already be deleted, its backups are found by the storage and the stanza.
     "secret_key": "secret",
     "path": "/exordos_db",
     "stanza": "SOURCE_INSTANCE_UUID",
-    "target_time": "2026-09-14T10:30:00Z"
+    "target": {"kind": "time", "time": "2026-09-14T10:30:00Z"}
   }
 }
 ```
@@ -215,9 +215,12 @@ already be deleted, its backups are found by the storage and the stanza.
 - The storage fields and `encryption_key` are the same as in `backup` of the
   source instance.
 - `stanza` is the uuid of the source instance.
-- `target_time` is the moment to recover to; `null` replays the whole archive.
-  A time in the future is rejected. It has to be covered by the archive: after
-  the end of the oldest kept full backup and before the last archived WAL.
+- `target` is where the recovery stops:
+    - `{"kind": "latest"}` (default): replay the whole archive;
+    - `{"kind": "time", "time": "2026-09-14T10:30:00Z"}`: recover to that
+      moment. A time in the future is rejected. It has to be after the end
+      of the oldest kept full backup; a time past the last archived WAL
+      recovers to the end of the archive.
 - `version` and `disk_size` must fit the backup: the same PostgreSQL major
   version and enough space for the data.
 - The new instance doesn't take backups unless its own `backup` is set. It
@@ -227,6 +230,15 @@ already be deleted, its backups are found by the storage and the stanza.
 Patroni bootstraps the cluster with `exordos-db-pg-restore`, which runs
 `pgbackrest restore`; PostgreSQL replays WAL up to the target and is promoted,
 replicas are cloned from it afterwards.
+
+The instance stays `IN_PROGRESS` until the recovery is over and its users
+and databases are imported. Meanwhile the read-only `restore_status` shows
+how the restore goes, `{"phase": "restoring" | "recovering" | "failed",
+"error": ...}`, and is `null` once it's over. Each node attempts the restore
+three times. When the restore fails on every node trying it, `error` says
+why and the instance turns `ERROR`: no backup before the target, a wrong key
+or stanza, an unreachable storage. Such an instance is deleted and created
+again with a fixed `restore_from`.
 
 Users and databases of the restored cluster appear in the API once the
 recovery is over. Imported users have no `password` (`null`) and keep their

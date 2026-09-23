@@ -100,6 +100,12 @@ class PGInstance(
     # before the control plane knows them. They aren't managed (so aren't
     # dropped) until they are imported.
     roles_imported = properties.property(types.Boolean(), default=False)
+    # {"phase": ..., "error": ...} of the restore of a new instance as its
+    # nodes report it, None when there is none in progress
+    restore_status = properties.property(types.AllowNone(types.Dict()), default=None)
+
+    def restore_failed(self) -> bool:
+        return self.restore_status is not None and bool(self.restore_status["error"])
 
     def get_users(self, session=None):
         return PGUser.objects.get_all(

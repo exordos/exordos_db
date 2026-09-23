@@ -173,8 +173,10 @@ def _restore_source(**kwargs):
 
 
 class TestS3RestoreSource:
-    def test_latest(self):
-        spec = _restore_source(encryption_key="k3y").restore_spec()
+    @pytest.mark.parametrize("target", [{}, {"target": {"kind": "latest"}}])
+    def test_latest(self, target):
+        # The end of the archive is what a source without a target replays to
+        spec = _restore_source(encryption_key="k3y", **target).restore_spec()
 
         assert spec["stanza"] == SOURCE_UUID
         assert spec["target_time"] is None
@@ -184,7 +186,9 @@ class TestS3RestoreSource:
         assert "repo1-retention-full" not in spec["options"]
 
     def test_target_time_in_utc(self):
-        source = _restore_source(target_time="2026-01-14T13:30:15.000250+03:00")
+        source = _restore_source(
+            target={"kind": "time", "time": "2026-01-14T13:30:15.000250+03:00"}
+        )
         assert source.restore_spec()["target_time"] == "2026-01-14 10:30:15.000250+00"
 
     def test_future_target_time(self):
@@ -192,7 +196,20 @@ class TestS3RestoreSource:
             hours=1
         )
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
-            _restore_source(target_time=future.isoformat())
+            _restore_source(target={"kind": "time", "time": future.isoformat()})
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            # A target carries the fields of its kind and nothing else
+            {"kind": "latest", "time": "2026-01-14T10:30:15Z"},
+            {"kind": "time"},
+            {"kind": "whenever"},
+        ],
+    )
+    def test_unknown_targets_are_rejected(self, target):
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            _restore_source(target=target)
 
     def test_schedule_is_not_accepted(self):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
@@ -290,6 +307,26 @@ class TestChooseBackupType:
             _backup("diff", self.now - 2 * HOUR),
         ]
         assert self._choose(backups) is None
+
+
+def test_error_starts_at_its_cause(monkeypatch):
+    stderr = (
+        "2026-09-23 14:01:21.652 P00   WARN: --delta or --force specified but ...\n"
+        "2026-09-23 14:01:21.671 P00  ERROR: [075]: no backup set found to restore"
+    )
+    monkeypatch.setattr(
+        pgbackrest.subprocess,
+        "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=75, stderr=stderr, stdout=""),
+    )
+
+    with pytest.raises(pgbackrest.PgBackRestError) as e:
+        pgbackrest.run("stanza", "restore")
+
+    assert str(e.value) == (
+        "restore failed with code 75: "
+        "2026-09-23 14:01:21.671 P00  ERROR: [075]: no backup set found to restore"
+    )
 
 
 def test_backup_is_sent_to_a_node_only_when_set():

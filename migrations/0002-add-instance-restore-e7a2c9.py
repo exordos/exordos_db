@@ -36,6 +36,7 @@ class MigrationStep(migrations.AbstarctMigrationStep):
 ALTER TABLE postgres_instances
     ADD COLUMN IF NOT EXISTS roles_imported BOOLEAN NOT NULL DEFAULT FALSE;
 """,
+            "ALTER TABLE postgres_instances ADD COLUMN IF NOT EXISTS restore_status JSONB;",
             # Users imported from a restored cluster have only a hash
             "ALTER TABLE postgres_users ALTER COLUMN password DROP NOT NULL;",
         ]
@@ -47,6 +48,7 @@ ALTER TABLE postgres_instances
         expressions = [
             "UPDATE postgres_users SET password = '' WHERE password IS NULL;",
             "ALTER TABLE postgres_users ALTER COLUMN password SET NOT NULL;",
+            "ALTER TABLE postgres_instances DROP COLUMN IF EXISTS restore_status;",
             "ALTER TABLE postgres_instances DROP COLUMN IF EXISTS roles_imported;",
             "ALTER TABLE postgres_instances DROP COLUMN IF EXISTS restore_from;",
         ]

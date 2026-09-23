@@ -149,6 +149,18 @@ RESTORE_BOOTSTRAP_METHOD = """\
 """
 
 
+def instance_status(instance: models.PGInstance, nodeset_status: str) -> str:
+    if instance.restore_failed():
+        return sdk_c.InstanceStatus.ERROR.value
+    # A restore isn't over until the users and databases are imported
+    if instance.restore_from is not None and not instance.roles_imported:
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+    try:
+        return sdk_c.InstanceStatus(nodeset_status).value
+    except ValueError:
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+
+
 def bootstrap_method(instance: models.PGInstance) -> str:
     return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
 
@@ -327,10 +339,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                     target.get_resource_kind(),
                 )
 
-        try:
-            instance.status = sdk_c.InstanceStatus(nodeset.status).value
-        except ValueError:
-            instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
+        instance.status = instance_status(instance, nodeset.status)
 
         return (tgt_nodeset, *new_objects)
 

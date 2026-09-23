@@ -103,28 +103,45 @@ class S3Backup(S3Storage):
         }
 
 
+class RestoreLatest(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """Replay the whole archive, i.e. recover to the end of it."""
+
+    KIND = "latest"
+
+
+class RestoreTime(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
+    """Replay the archive up to a moment."""
+
+    KIND = "time"
+
+    time = properties.property(types.UTCDateTimeZ(), required=True)
+
+    def validate(self) -> None:
+        # A moment that was in the past when it was saved stays in the past,
+        # so this holds when the row is read back as well
+        if self.time > datetime.datetime.now(datetime.timezone.utc):
+            raise ValueError("target.time is in the future")
+
+
+RESTORE_TARGET_TYPE = types_dynamic.KindModelSelectorType(
+    types_dynamic.KindModelType(RestoreLatest),
+    types_dynamic.KindModelType(RestoreTime),
+)
+
+
 class S3RestoreSource(S3Storage):
     KIND = "s3"
 
     # Stanza of the backed up instance, i.e. its uuid. The instance itself
     # may be gone already.
     stanza = properties.property(types.UUID(), required=True)
-    # Replay WAL up to this moment, up to the end of the archive when None
-    target_time = properties.property(
-        types.AllowNone(types.UTCDateTimeZ()),
-        default=None,
-    )
-
-    def validate(self) -> None:
-        if self.target_time is not None and self.target_time > datetime.datetime.now(
-            datetime.timezone.utc
-        ):
-            raise ValueError("target_time is in the future")
+    # What the recovery stops at
+    target = properties.property(RESTORE_TARGET_TYPE, default=RestoreLatest)
 
     def restore_spec(self) -> dict[str, tp.Any]:
         target_time = None
-        if self.target_time is not None:
-            target_time = self.target_time.astimezone(datetime.timezone.utc).strftime(
+        if isinstance(self.target, RestoreTime):
+            target_time = self.target.time.astimezone(datetime.timezone.utc).strftime(
                 "%Y-%m-%d %H:%M:%S.%f+00"
             )
         return {

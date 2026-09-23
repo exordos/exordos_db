@@ -84,6 +84,15 @@ class PatroniClient:
             )
         return self._primary_cache[1]
 
+    @property
+    def member_name(self) -> str:
+        return self._config["name"]
+
+    def cluster(self) -> dict[str, tp.Any]:
+        response = self._client.get(f"{self._endpoint}/cluster")
+        response.raise_for_status()
+        return response.json()
+
     def config_get(self):
         response = self._client.get(f"{self._endpoint}/config")
         response.raise_for_status()
@@ -161,6 +170,11 @@ class PGInstance(meta.MetaDataPlaneModel):
     # plane learns about changes on the data plane, while a differing target
     # field would make the agent apply the target instead of reporting it.
     found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # {"phase": ..., "error": ...} while the restore a new cluster is
+    # bootstrapped with is in progress. Not a target field, like found_roles.
+    restore_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     _meta_fields: tp.ClassVar[set[str]] = {
         "uuid",
@@ -367,9 +381,25 @@ WHERE d.datname not in """
         )
         self.backup = spec if archiving and not stanza_missing else BACKUP_UNSETTLED
 
+    def _patroni_down(self) -> bool:
+        try:
+            self.c.pclient.is_primary(get_ttl_hash(seconds=20))
+        except requests.RequestException:
+            return True
+        return False
+
     def dump_to_dp(self) -> None:
         self.roles_unmanaged = self.users is None
+        # Patroni restarts over and over after a failed bootstrap: there is
+        # nothing to apply, but the failure has to be reported
+        if pgbackrest.load_restore_state() is None or not self._patroni_down():
+            self._apply()
+        # A node that hasn't converged to the target isn't read back: the
+        # agent reports the created or updated target, so the progress has
+        # to be on it
+        self.restore_state = self._bootstrap_state()
 
+    def _apply(self) -> None:
         primary = self.c.pclient.is_primary(get_ttl_hash(seconds=20))
 
         # Stop archiving before the config it uses is removed
@@ -397,7 +427,44 @@ WHERE d.datname not in """
         # The stanza has to exist before archiving is turned on
         self._reconcile_DCS(archiving=self._reconcile_backup_stanza())
 
+    def _bootstrap_state(self) -> dict[str, tp.Any] | None:
+        """Return the progress of the restore the cluster is bootstrapped with."""
+        state = pgbackrest.load_restore_state()
+        if state is None:
+            return None
+        pclient = self.c.pclient
+        try:
+            primary = pclient.is_primary(get_ttl_hash(seconds=20))
+            members = [] if primary else pclient.cluster().get("members", [])
+        except requests.RequestException:
+            # Patroni restarts after a failed bootstrap
+            return self._report(state)
+        if primary:
+            # Recovered and promoted
+            pgbackrest.remove_restore_state()
+            return None
+        leader = next((m for m in members if m.get("role") == "leader"), None)
+        if leader is not None and leader["name"] != pclient.member_name:
+            # Another node bootstrapped the cluster after this one failed to,
+            # this one is its replica now
+            pgbackrest.remove_restore_state()
+            return None
+        return self._report(state)
+
+    @staticmethod
+    def _report(state: dict[str, tp.Any]) -> dict[str, tp.Any]:
+        return {"phase": state["phase"], "error": state["error"]}
+
     def restore_from_dp(self) -> None:
+        # The restore in progress is all there is to report, PostgreSQL may
+        # well be down
+        self.restore_state = self._bootstrap_state()
+        if self.restore_state is not None:
+            self.users = None
+            self.databases = None
+            self.found_roles = None
+            return
+
         self.users = {}
         self.databases = {}
         self._fill_actual_users()

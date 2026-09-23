@@ -49,6 +49,11 @@ RESTORE_SPEC_FILE = f"{CONF_DIR}/exordos_restore.json"
 # The restore config is referenced by restore_command until the recovery
 # ends, so it lives next to the data until the agent sees a primary
 RESTORE_CONF_FILE = f"{cc.PATRONI_DIR}/pgbackrest-restore.conf"
+# The progress of the restore a cluster is bootstrapped with, see
+# exordos_db.cmd.pg_restore; removed once the node is a primary
+RESTORE_STATE_FILE = f"{cc.PATRONI_DIR}/exordos_restore_state.json"
+# Errors reach the API, a pgBackRest error may be long
+ERROR_MAX_LENGTH = 1024
 # Fingerprint of the repository the stanza was created in on this node
 STANZA_MARKER_FILE = f"{cc.WORK_DIR}/backup_stanza.sha256"
 
@@ -117,13 +122,15 @@ def _read(path: str) -> str | None:
         return None
 
 
-def _write(path: str, content: str, mode: int, group: str) -> None:
+def _write(path: str, content: str, mode: int, group: str | None) -> None:
+    """Replace the file at once. `group` makes it root's with that group."""
     tmp = f"{path}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w") as f:
         f.write(content)
     os.chmod(tmp, mode)
-    shutil.chown(tmp, user="root", group=group)
+    if group is not None:
+        shutil.chown(tmp, user="root", group=group)
     os.replace(tmp, path)
 
 
@@ -184,9 +191,11 @@ def run(
         cmd, capture_output=True, text=True, timeout=timeout, check=False
     )
     if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip()
+        # The cause follows the warnings, from the line of the error on
+        start = output.rfind("\n", 0, max(output.find("ERROR:"), 0)) + 1
         raise PgBackRestError(
-            f"{' '.join(args)} failed with code {result.returncode}: "
-            f"{result.stderr.strip() or result.stdout.strip()}"
+            f"{' '.join(args)} failed with code {result.returncode}: {output[start:]}"
         )
     return result.stdout
 
@@ -200,6 +209,26 @@ def write_restore_config(spec: dict[str, tp.Any]) -> None:
 
 def remove_restore_config() -> bool:
     return _remove(RESTORE_CONF_FILE)
+
+
+def error_text(error: BaseException | str) -> str:
+    """Shorten an error to report it to the control plane."""
+    text = str(error).strip()
+    return text if len(text) <= ERROR_MAX_LENGTH else f"{text[:ERROR_MAX_LENGTH]}..."
+
+
+def load_restore_state() -> dict[str, tp.Any] | None:
+    content = _read(RESTORE_STATE_FILE)
+    return None if content is None else json.loads(content)
+
+
+def save_restore_state(state: dict[str, tp.Any]) -> None:
+    # Written by the bootstrap running as postgres, no credentials in it
+    _write(RESTORE_STATE_FILE, json.dumps(state, sort_keys=True), 0o644, None)
+
+
+def remove_restore_state() -> bool:
+    return _remove(RESTORE_STATE_FILE)
 
 
 def restore_args(spec: dict[str, tp.Any]) -> list[str]:

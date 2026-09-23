@@ -57,6 +57,21 @@ class PaaSBuilder(builder.PaaSBuilder):
         return scheduled
 
 
+def restore_status(
+    actuals: tp.Iterable[models.PGInstanceNode | None],
+) -> dict[str, tp.Any] | None:
+    """Sum up what the nodes report about the restore in progress."""
+    reports = [
+        actual.restore_state
+        for actual in actuals
+        if actual is not None and actual.restore_state is not None
+    ]
+    if not reports:
+        return None
+    # Another node may still be restoring after this one failed to
+    return next((r for r in reports if not r["error"]), reports[0])
+
+
 class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
     def __init__(
         self,
@@ -117,8 +132,13 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         found_users = actual.found_roles["users"]
         found_databases = actual.found_roles["databases"]
 
-        users = {}
+        # By name: rows of an earlier, interrupted pass or created through
+        # the API meanwhile are kept, not doubled
+        users = {u.name: u for u in instance.get_users()}
+        databases = {d.name for d in instance.get_databases()}
         for name, user in found_users.items():
+            if name in users:
+                continue
             if not user.get("pw_hash"):
                 LOG.warning(
                     "User %s of the restored instance %s has no password, "
@@ -136,6 +156,8 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             users[name].insert()
 
         for name, database in found_databases.items():
+            if name in databases:
+                continue
             if (owner := users.get(database["owner"])) is None:
                 LOG.warning(
                     "Database %s of the restored instance %s is owned by %s "
@@ -161,11 +183,22 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             instance.uuid,
         )
 
+    @staticmethod
+    def _update_restore_status(
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        status = restore_status(paas_collection.actuals())
+        if status != instance.restore_status:
+            instance.restore_status = status
+            instance.update(force=True)
+
     def actualize_paas_objects_source_data_plane(
         self,
         instance: models.PGInstance,
         paas_collection: builder.PaaSCollection,
     ) -> tp.Collection[ua_models.TargetResourceKindAwareMixin]:
+        self._update_restore_status(instance, paas_collection)
         if not self._roles_managed(instance):
             self._import_roles(instance, paas_collection)
         return super().actualize_paas_objects_source_data_plane(
