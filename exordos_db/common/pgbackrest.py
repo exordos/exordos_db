@@ -263,3 +263,97 @@ def choose_backup_type(
         return "incr"
 
     return None
+
+
+# Segments of the default size, 16 MiB, 256 to a WAL file name's middle part
+WAL_SEGMENT_SIZE = 16 * 1024 * 1024
+SEGMENTS_PER_ID = 0x100000000 // WAL_SEGMENT_SIZE
+
+
+def _segment(name: str) -> tuple[int, int]:
+    """Return the timeline and the number of a WAL segment name."""
+    return int(name[:8], 16), int(name[8:16], 16) * SEGMENTS_PER_ID + int(
+        name[16:24], 16
+    )
+
+
+def _segment_name(timeline: int, number: int) -> str:
+    return (
+        f"{timeline:08X}{number // SEGMENTS_PER_ID:08X}{number % SEGMENTS_PER_ID:08X}"
+    )
+
+
+def parse_history(content: str) -> list[tuple[int, int]]:
+    """Return the timeline switches of a history file, (parent, switch LSN)."""
+    switches = []
+    for line in content.splitlines():
+        fields = line.split()
+        if len(fields) < 2 or line.lstrip().startswith("#"):
+            continue
+        high, low = fields[1].split("/")
+        switches.append((int(fields[0]), (int(high, 16) << 32) + int(low, 16)))
+    return switches
+
+
+def needed_wal(start: str, stop: str, switches: list[tuple[int, int]]) -> list[str]:
+    """Return the WAL segments recovery from `start` to `stop` reads.
+
+    `switches` are those of the history file of the timeline of `stop`:
+    recovery takes each segment from the latest timeline begun by then.
+    """
+    timeline, first = _segment(start)
+    stop_timeline, last = _segment(stop)
+    # Each switch begins the next timeline, the last one that of `stop`
+    children = [parent for parent, _ in switches[1:]] + [stop_timeline]
+    begins = {
+        lsn // WAL_SEGMENT_SIZE: child for (_, lsn), child in zip(switches, children)
+    }
+
+    needed = []
+    for number in range(first, last + 1):
+        timeline = max(timeline, begins.get(number, timeline))
+        needed.append(_segment_name(timeline, number))
+    return needed
+
+
+def archive_gap(stanza: str, info: dict[str, tp.Any]) -> list[str]:
+    """Return the WAL segments missing from the archive since the last backup.
+
+    `info` is the stanza of `pgbackrest info --output=json`. Recovery to any
+    moment past a missing segment stops before it, until a backup is taken
+    past it.
+    """
+    if not (backups := info.get("backup")):
+        return []
+    latest = max(backups, key=lambda b: b["timestamp"]["stop"])
+    archive = next(
+        a for a in info["archive"] if a["database"]["id"] == latest["database"]["id"]
+    )
+
+    stop = archive["max"]
+    timeline, _ = _segment(stop)
+    history = ""
+    if timeline > 1:
+        history = _read(f"{PG_DATA_DIR}/pg_wal/{timeline:08X}.history")
+        if history is None:
+            LOG.warning(
+                "No history of timeline %s, the archive isn't checked", timeline
+            )
+            return []
+    needed = needed_wal(latest["archive"]["start"], stop, parse_history(history))
+    # Segments archive-push still sends, in parallel, aren't lost. Seen
+    # before the listing: one that lands in between is in either
+    status = f"{PG_DATA_DIR}/pg_wal/archive_status"
+    sending = {name for name in needed if os.path.exists(f"{status}/{name}.ready")}
+
+    archived = set()
+    for directory in sorted({name[:16] for name in needed}):
+        listing = run(
+            stanza,
+            "--output=json",
+            "repo-ls",
+            f"archive/{stanza}/{archive['id']}/{directory}",
+        )
+        archived.update(name[:24] for name in json.loads(listing))
+    archived |= sending
+    return [name for name in needed if name not in archived]

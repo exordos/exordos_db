@@ -184,6 +184,13 @@ Archiving is turned on only once the stanza is created; until then users,
 databases and replication settings are applied as usual, and the agent keeps
 retrying.
 
+WAL can go missing from the archive: a primary that goes down before it has
+archived its last segments, WAL dropped while the storage was unreachable.
+Nothing past a missing segment can be restored until a backup is taken past
+it, so the timer takes one as soon as it finds such a gap, and logs the
+segments that are missing. Moments between the gap and that backup can't be
+restored to.
+
 ## Restoring to a Point in Time
 
 A new instance can start from the backups of another one instead of an empty

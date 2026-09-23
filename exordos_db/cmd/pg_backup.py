@@ -50,6 +50,14 @@ def main() -> int:
     backups = info[0].get("backup", []) if info else []
 
     backup_type = pgbackrest.choose_backup_type(backups, spec["schedule"], time.time())
+    # WAL lost to a failover or dropped while the storage was unreachable:
+    # nothing past it can be restored until a backup is taken past it
+    if backup_type is None and (missing := pgbackrest.archive_gap(stanza, info[0])):
+        LOG.warning(
+            "WAL %s is missing from the archive, taking a backup past it",
+            ", ".join(missing),
+        )
+        backup_type = "incr"
     if backup_type is None:
         LOG.info("No backup is due")
         return 0

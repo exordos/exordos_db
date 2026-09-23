@@ -15,6 +15,7 @@
 #    under the License.
 
 import datetime
+import json
 import types
 import uuid
 
@@ -363,3 +364,106 @@ def test_restore_fields_are_sent_to_a_node_only_when_set():
     assert node.to_ua_resource().value["backup"] == {"stanza": "s"}
     node.adopt_roles = True
     assert node.to_ua_resource().value["adopt_roles"] is True
+
+
+# The stand's failover: timeline 3 ended in segment 5F, the old primary went
+# down before it archived 5E
+HISTORY = "1\t0/20000A0\tno recovery target\n\n2\t0/5A0000A0\tno recovery target\n\n3\t0/5F0000A0\tno recovery target\n"
+SEGMENTS = [
+    "00000003000000000000005B",
+    "00000003000000000000005C",
+    "00000003000000000000005D",
+    "00000003000000000000005E",
+    "00000004000000000000005F",
+]
+
+
+class TestArchiveGap:
+    def test_needed_wal_follows_the_timelines(self):
+        switches = pgbackrest.parse_history(HISTORY)
+
+        assert pgbackrest.needed_wal(SEGMENTS[0], SEGMENTS[-1], switches) == SEGMENTS
+
+    def test_needed_wal_of_the_first_timeline_crosses_the_log_id(self):
+        assert pgbackrest.needed_wal(
+            "0000000100000000000000FF", "000000010000000100000000", []
+        ) == ["0000000100000000000000FF", "000000010000000100000000"]
+
+    def _info(self):
+        return {
+            "backup": [
+                {
+                    "timestamp": {"stop": 100},
+                    "database": {"id": 1},
+                    "archive": {"start": SEGMENTS[0]},
+                },
+            ],
+            "archive": [{"database": {"id": 1}, "id": "18-1", "max": SEGMENTS[-1]}],
+        }
+
+    @pytest.fixture
+    def repository(self, tmp_path, monkeypatch):
+        (tmp_path / "pg_wal").mkdir()
+        (tmp_path / "pg_wal" / "00000004.history").write_text(HISTORY)
+        monkeypatch.setattr(pgbackrest, "PG_DATA_DIR", str(tmp_path))
+        files = {}
+        listed = []
+
+        def run(stanza, *args, timeout=None):
+            listed.append(args[-1])
+            directory = args[-1].rsplit("/", 1)[-1]
+            return json.dumps(
+                {f"{n}-sha1.zst": {} for n in files if n.startswith(directory)}
+            )
+
+        monkeypatch.setattr(pgbackrest, "run", run)
+        return files, listed
+
+    def test_missing_segment_is_found(self, repository):
+        files, listed = repository
+        files.update(dict.fromkeys(s for s in SEGMENTS if not s.endswith("5E")))
+
+        assert pgbackrest.archive_gap("st", self._info()) == [
+            "00000003000000000000005E"
+        ]
+        assert listed == [
+            "archive/st/18-1/0000000300000000",
+            "archive/st/18-1/0000000400000000",
+        ]
+
+    def test_segment_still_being_archived_isnt_missing(self, repository, tmp_path):
+        files, _ = repository
+        files.update(dict.fromkeys(s for s in SEGMENTS if not s.endswith("5E")))
+        status = tmp_path / "pg_wal" / "archive_status"
+        status.mkdir()
+        (status / "00000003000000000000005E.ready").touch()
+
+        assert pgbackrest.archive_gap("st", self._info()) == []
+
+    def test_segment_archived_during_the_listing_isnt_missing(
+        self, repository, tmp_path, monkeypatch
+    ):
+        # Sent after its directory was listed: .ready is gone by the end
+        files, _ = repository
+        files.update(dict.fromkeys(s for s in SEGMENTS if not s.endswith("5E")))
+        status = tmp_path / "pg_wal" / "archive_status"
+        status.mkdir()
+        ready = status / "00000003000000000000005E.ready"
+        ready.touch()
+        listing = pgbackrest.run
+        monkeypatch.setattr(
+            pgbackrest,
+            "run",
+            lambda *a, **k: (ready.unlink(missing_ok=True), listing(*a, **k))[1],
+        )
+
+        assert pgbackrest.archive_gap("st", self._info()) == []
+
+    def test_continuous_archive_has_no_gap(self, repository):
+        files, _ = repository
+        files.update(dict.fromkeys(SEGMENTS))
+
+        assert pgbackrest.archive_gap("st", self._info()) == []
+
+    def test_nothing_to_check_without_a_backup(self, repository):
+        assert pgbackrest.archive_gap("st", {"backup": [], "archive": []}) == []
