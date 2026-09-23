@@ -11,19 +11,25 @@ reinstalled from the new one.
 
 ## What is collected
 
-vmagent scrapes three local endpoints every 15 s:
+vmagent scrapes local endpoints, every 15 s unless stated otherwise:
 
 | Job | Endpoint | What it covers |
 |---|---|---|
 | `node_exporter` | `127.0.0.1:9100`, from the base image | the node, including the data disk |
 | `patroni` | `127.0.0.1:8008/metrics`, the Patroni REST API | role, HA state, WAL positions, timeline (`patroni_*`) |
-| `postgres_exporter` | `127.0.0.1:9187`, `prometheus-postgres-exporter` | sessions, database sizes, WAL, replication, statistics (`pg_*`) |
+| `postgres_exporter` | `127.0.0.1:9187`, `exordos-postgres-exporter` | sessions, locks, database sizes, WAL, replication and slots, checkpoints, transaction ID age (`pg_*`) |
+| `postgres_exporter_databases` | `127.0.0.1:9188/probe`, `exordos-postgres-exporter-databases`, every 60 s | per-table statistics of every database: sizes, rows, scans, vacuum (`pg_stat_user_tables_*`, `pg_statio_user_tables_*`, `pg_stat_progress_vacuum_*`), at most 30000 series a database |
 
 Every series carries:
 
 - `exordos_db_instance` — the instance uuid;
 - `exordos_project` — the project of the instance;
+- `exordos_db_type` — the engine, `postgres`: the dashboards and queries of
+  each engine select their own series by it;
 - `instance` — the node host name, `dbaas-dp-<instance uuid>-node-<suffix>`.
+
+The series of `postgres_exporter_databases` also carry `database`, the
+database probed, and the per-table ones `datname`, `schemaname` and `relname`.
 
 Patroni adds `scope` (the instance name) and `name` (the node uuid, also the
 `application_name` of a replica on the primary).
@@ -39,6 +45,18 @@ queries to PostgreSQL, which is what postgres_exporter does. It is the Ubuntu
 package (0.19.0 on 26.04), so there is no binary to pin, and it runs as
 `postgres` over the local socket with peer authentication, so there is no
 password to deliver. It listens on the loopback only.
+
+Why two postgres_exporters. PostgreSQL shows the per-table statistics only to
+a session of the same database, while the exporter keeps one connection. The
+first one, connected to `postgres`, collects the instance-wide statistics;
+the second one collects nothing on its own and is probed by vmagent once per
+database, with only the per-table collectors and the vacuum progress on,
+whose table names resolve in the database of the session only. The pg agent keeps the list
+of databases in `/var/lib/exordos/exordos_db/vmagent_databases.json`, a
+file_sd file vmagent rereads every minute, so a new database is picked up
+without a restart. Every node writes it: a replica has the same databases.
+The per-table statistics of a replica only count the queries run on it, the
+dashboards read the ones of the primary.
 
 ## How full the disks are
 
@@ -144,6 +162,47 @@ Errors only:
 _HOSTNAME:~"^dbaas-dp-<instance uuid>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
 ```
 
+## Transactions, locks and maintenance
+
+Age of the oldest open transaction of a client, per state; `idle in
+transaction` is a client that opened a transaction and doesn't finish it:
+
+```promql
+max by (exordos_db_instance, state) (
+  pg_stat_activity_max_tx_duration{backend_type="client backend", state!="idle"}
+)
+```
+
+Transaction ID age as a share of `autovacuum_freeze_max_age`. Past 1
+autovacuum freezes aggressively; PostgreSQL stops accepting writes near 2^31
+transactions:
+
+```promql
+max by (exordos_db_instance) (
+  max by (exordos_db_instance, instance) (pg_database_wraparound_age_datfrozenxid_seconds)
+  / on (exordos_db_instance, instance)
+  max by (exordos_db_instance, instance) (pg_settings_autovacuum_freeze_max_age)
+)
+```
+
+WAL each replication slot keeps on the primary (Patroni keeps copies of the
+slots on the replicas, inactive):
+
+```promql
+max by (exordos_db_instance, slot_name) (
+  pg_replication_slots_pg_wal_lsn_diff
+  and on (instance) (patroni_primary == 1)
+)
+```
+
+Dead rows of the tables, on the primary:
+
+```promql
+sum by (exordos_db_instance, datname, schemaname, relname) (
+  pg_stat_user_tables_n_dead_tup and on (instance) (patroni_primary == 1)
+)
+```
+
 ## Dashboard
 
 The `dbaas_dashboard` element puts a **PostgreSQL instance** dashboard into the
@@ -166,3 +225,6 @@ Patroni and PostgreSQL logs with the error rate. It depends on the
   here until it is added to the template as well.
 - **postgres_exporter reads as the superuser.** Peer authentication maps the
   `postgres` system user to the `postgres` role only.
+- **Every probe of a database opens connections.** The per-database exporter
+  connects anew on every probe, so with `log_connections` on each database
+  adds a few lines a minute to the PostgreSQL log.

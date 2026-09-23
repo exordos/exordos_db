@@ -177,10 +177,36 @@ VMAGENT_SCRAPE_JOB_TEMPLATE = """\
     static_configs:
       - targets: ["{target}"]
         labels:
-          instance: "__HOSTNAME__"
-          exordos_db_instance: "{instance_uuid}"
-          exordos_project: "{project_id}"
+{labels}
 """
+
+# The agent lists the databases in the file_sd file, each target with its
+# DSN in __param_target; they are all probed through the same exporter.
+# About 30 series a table: the limit, per database, keeps a schema of
+# thousands of tables off the shared VictoriaMetrics. The progress of the
+# vacuums of the whole instance comes with every database, with table names
+# only in the one of the probe: that's the one kept.
+VMAGENT_SCRAPE_DATABASES_JOB_TEMPLATE = """\
+  - job_name: "postgres_exporter_databases"
+    scrape_interval: 60s
+    series_limit: {series_limit}
+    metrics_path: /probe
+    file_sd_configs:
+      - files: ["{sd_file}"]
+    relabel_configs:
+      - target_label: __address__
+        replacement: "{target}"
+{relabels}
+    metric_relabel_configs:
+      - if: '{{__name__=~"pg_stat_progress_vacuum_.+"}}'
+        action: keep_if_equal
+        source_labels: [datname, database]
+"""
+DATABASE_SERIES_LIMIT = 30000
+
+# The engine of the instance, the same label on every engine's nodes tells
+# their series apart
+DB_TYPE = "postgres"
 
 
 def render_vmagent_scrape(
@@ -189,26 +215,45 @@ def render_vmagent_scrape(
     """Render the vmagent scrape config template, the same for every node.
 
     It replaces the one of the base image, which only scrapes node_exporter,
-    and labels every series with the instance uuid and its project; the node
-    host name stays in `instance`, as the base image has it.
+    and labels every series with the instance uuid, its project and the
+    engine; the node host name stays in `instance`, as the base image has it.
     """
+    labels = {
+        "instance": "__HOSTNAME__",
+        "exordos_db_instance": str(instance_uuid),
+        "exordos_project": str(project_id),
+        "exordos_db_type": DB_TYPE,
+    }
     jobs = (
         ("node_exporter", c.NODE_EXPORTER_ENDPOINT),
         ("patroni", f"127.0.0.1:{c.PATRONI_API_PORT}"),
         ("postgres_exporter", c.POSTGRES_EXPORTER_ENDPOINT),
     )
+    static_labels = "\n".join(
+        f'          {name}: "{value}"' for name, value in labels.items()
+    )
+    relabels = "\n".join(
+        f'      - target_label: {name}\n        replacement: "{value}"'
+        for name, value in labels.items()
+    )
     return (
-        "# vmagent scrape configuration template of a DBaaS node\n"
-        "# Managed by Exordos DB control plane — do not edit manually\n"
-        "scrape_configs:\n"
-    ) + "".join(
-        VMAGENT_SCRAPE_JOB_TEMPLATE.format(
-            job=job,
-            target=target,
-            instance_uuid=instance_uuid,
-            project_id=project_id,
+        (
+            "# vmagent scrape configuration template of a DBaaS node\n"
+            "# Managed by Exordos DB control plane — do not edit manually\n"
+            "scrape_configs:\n"
         )
-        for job, target in jobs
+        + "".join(
+            VMAGENT_SCRAPE_JOB_TEMPLATE.format(
+                job=job, target=target, labels=static_labels
+            )
+            for job, target in jobs
+        )
+        + VMAGENT_SCRAPE_DATABASES_JOB_TEMPLATE.format(
+            sd_file=c.VMAGENT_DATABASES_SD_FILE,
+            series_limit=DATABASE_SERIES_LIMIT,
+            target=c.POSTGRES_DB_EXPORTER_ENDPOINT,
+            relabels=relabels,
+        )
     )
 
 

@@ -11,19 +11,25 @@
 
 ## Что собирается
 
-vmagent опрашивает три локальных эндпоинта раз в 15 с:
+vmagent опрашивает локальные эндпоинты, раз в 15 с, если не сказано иное:
 
 | Job | Эндпоинт | Что покрывает |
 |---|---|---|
 | `node_exporter` | `127.0.0.1:9100`, из базового образа | ноду, включая диск данных |
 | `patroni` | `127.0.0.1:8008/metrics`, REST API Patroni | роль, состояние HA, позиции WAL, таймлайн (`patroni_*`) |
-| `postgres_exporter` | `127.0.0.1:9187`, `prometheus-postgres-exporter` | сессии, размеры баз, WAL, репликацию, статистику (`pg_*`) |
+| `postgres_exporter` | `127.0.0.1:9187`, `exordos-postgres-exporter` | сессии, блокировки, размеры баз, WAL, репликацию и слоты, checkpoint'ы, возраст ID транзакций (`pg_*`) |
+| `postgres_exporter_databases` | `127.0.0.1:9188/probe`, `exordos-postgres-exporter-databases`, раз в 60 с | статистику таблиц каждой базы: размеры, строки, сканирования, vacuum (`pg_stat_user_tables_*`, `pg_statio_user_tables_*`, `pg_stat_progress_vacuum_*`), не больше 30000 серий на базу |
 
 У каждой серии есть метки:
 
 - `exordos_db_instance` — uuid инстанса;
 - `exordos_project` — проект инстанса;
+- `exordos_db_type` — движок, `postgres`: по ней дашборды и запросы каждого
+  движка выбирают свои серии;
 - `instance` — имя хоста ноды, `dbaas-dp-<uuid инстанса>-node-<суффикс>`.
+
+У серий `postgres_exporter_databases` есть ещё `database` — опрошенная база, а
+у потабличных — `datname`, `schemaname` и `relname`.
 
 Patroni добавляет `scope` (имя инстанса) и `name` (uuid ноды; он же
 `application_name` реплики на праймари).
@@ -39,6 +45,18 @@ vmagent `/etc/exordos_observability/vmagent_scrape.yml.tpl` вместо шаб�
 (0.19.0 в 26.04), так что пинить отдельный бинарь не нужно, а работает он от
 `postgres` через локальный сокет с peer-аутентификацией, так что и пароль
 доставлять не нужно. Слушает только loopback.
+
+Почему два postgres_exporter. Статистику таблиц PostgreSQL показывает только
+сессии той же базы, а экспортер держит одно соединение. Первый, подключённый к
+`postgres`, собирает статистику всего инстанса; второй сам ничего не собирает,
+vmagent опрашивает его по разу на каждую базу, и в нём включены только
+потабличные коллекторы и прогресс vacuum: имена таблиц разрешаются только в
+базе сессии. Список баз pg-агент держит в
+`/var/lib/exordos/exordos_db/vmagent_databases.json` — это file_sd-файл,
+который vmagent перечитывает раз в минуту, так что новая база подхватывается
+без перезапуска. Пишет его каждая нода: у реплики те же базы. Потабличная
+статистика реплики учитывает только запросы на ней самой, дашборды берут
+статистику праймари.
 
 ## Насколько заполнены диски
 
@@ -144,6 +162,47 @@ _HOSTNAME:~"^dbaas-dp-<uuid инстанса>-node-" _SYSTEMD_UNIT:"exordos-patr
 _HOSTNAME:~"^dbaas-dp-<uuid инстанса>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
 ```
 
+## Транзакции, блокировки и обслуживание
+
+Возраст самой старой открытой транзакции клиента по состояниям; `idle in
+transaction` — клиент открыл транзакцию и не завершает её:
+
+```promql
+max by (exordos_db_instance, state) (
+  pg_stat_activity_max_tx_duration{backend_type="client backend", state!="idle"}
+)
+```
+
+Возраст ID транзакций как доля от `autovacuum_freeze_max_age`. После 1
+autovacuum замораживает агрессивно; около 2^31 транзакций PostgreSQL
+перестаёт принимать запись:
+
+```promql
+max by (exordos_db_instance) (
+  max by (exordos_db_instance, instance) (pg_database_wraparound_age_datfrozenxid_seconds)
+  / on (exordos_db_instance, instance)
+  max by (exordos_db_instance, instance) (pg_settings_autovacuum_freeze_max_age)
+)
+```
+
+WAL, который держит каждый слот репликации на праймари (копии слотов на
+репликах Patroni держит неактивными):
+
+```promql
+max by (exordos_db_instance, slot_name) (
+  pg_replication_slots_pg_wal_lsn_diff
+  and on (instance) (patroni_primary == 1)
+)
+```
+
+Мёртвые строки таблиц, на праймари:
+
+```promql
+sum by (exordos_db_instance, datname, schemaname, relname) (
+  pg_stat_user_tables_n_dead_tup and on (instance) (patroni_primary == 1)
+)
+```
+
 ## Дашборд
 
 Элемент `dbaas_dashboard` кладёт дашборд **PostgreSQL instance** в папку
@@ -166,3 +225,6 @@ Patroni и PostgreSQL с частотой ошибок. Зависит от эл
   опрашивается, пока его не добавят и в этот шаблон.
 - **postgres_exporter читает под суперпользователем.** Peer-аутентификация
   сопоставляет системного пользователя `postgres` только с ролью `postgres`.
+- **Каждый опрос базы открывает соединения.** Экспортер баз подключается
+  заново при каждом опросе, так что при включённом `log_connections` каждая
+  база добавляет в лог PostgreSQL несколько строк в минуту.

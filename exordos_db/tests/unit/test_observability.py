@@ -15,12 +15,15 @@
 #    under the License.
 
 import configparser
+import json
 from pathlib import Path
 import re
 import uuid as sys_uuid
 
 import yaml
 
+from exordos_db.agent.universal.drivers import pg
+from exordos_db.common import constants
 from exordos_db.infra.dm import models
 from exordos_db.infra.services import builder
 
@@ -32,13 +35,14 @@ LABELS = {
     "instance": "__HOSTNAME__",
     "exordos_db_instance": str(INSTANCE_UUID),
     "exordos_project": str(PROJECT_ID),
+    "exordos_db_type": "postgres",
 }
 
 
 def test_scrape_config_labels_every_job_with_the_instance():
     content = builder.render_vmagent_scrape(INSTANCE_UUID, PROJECT_ID)
 
-    jobs = yaml.safe_load(content)["scrape_configs"]
+    *jobs, databases = yaml.safe_load(content)["scrape_configs"]
 
     assert [(j["job_name"], j["static_configs"]) for j in jobs] == [
         ("node_exporter", [{"targets": ["127.0.0.1:9100"], "labels": LABELS}]),
@@ -46,6 +50,71 @@ def test_scrape_config_labels_every_job_with_the_instance():
         ("postgres_exporter", [{"targets": ["127.0.0.1:9187"], "labels": LABELS}]),
     ]
     assert {j["scrape_interval"] for j in jobs} == {"15s"}
+    assert databases == {
+        "job_name": "postgres_exporter_databases",
+        "scrape_interval": "60s",
+        "series_limit": 30000,
+        "metrics_path": "/probe",
+        "file_sd_configs": [{"files": [constants.VMAGENT_DATABASES_SD_FILE]}],
+        "relabel_configs": [
+            {"target_label": "__address__", "replacement": "127.0.0.1:9188"},
+            *(
+                {"target_label": name, "replacement": value}
+                for name, value in LABELS.items()
+            ),
+        ],
+        # Vacuums of the whole instance come with every database, table
+        # names only with the one of the probe
+        "metric_relabel_configs": [
+            {
+                "if": '{__name__=~"pg_stat_progress_vacuum_.+"}',
+                "action": "keep_if_equal",
+                "source_labels": ["datname", "database"],
+            }
+        ],
+    }
+
+
+def test_database_scrape_targets_carry_a_url_dsn():
+    targets = pg.database_scrape_targets(["b", "a"])
+
+    assert targets == [
+        {
+            "targets": ["a"],
+            "labels": {
+                "database": "a",
+                "__param_target": (
+                    "postgresql://postgres@/a?host=/var/run/postgresql&sslmode=disable"
+                ),
+            },
+        },
+        {
+            "targets": ["b"],
+            "labels": {
+                "database": "b",
+                "__param_target": (
+                    "postgresql://postgres@/b?host=/var/run/postgresql&sslmode=disable"
+                ),
+            },
+        },
+    ]
+
+
+def test_database_scrape_targets_are_written_on_change_only(tmp_path, monkeypatch):
+    path = tmp_path / "vmagent_databases.json"
+    monkeypatch.setattr(constants, "VMAGENT_DATABASES_SD_FILE", str(path))
+
+    assert pg.write_database_scrape_targets({"app": {"owner": "app"}})
+    assert json.loads(path.read_text()) == pg.database_scrape_targets(["app"])
+    assert oct(path.stat().st_mode & 0o777) == "0o644"
+    mtime = path.stat().st_mtime_ns
+
+    assert not pg.write_database_scrape_targets({"app": {"owner": "app"}})
+    assert path.stat().st_mtime_ns == mtime
+
+    assert pg.write_database_scrape_targets({})
+    assert json.loads(path.read_text()) == []
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_scrape_config_replaces_the_base_image_template():
@@ -77,7 +146,33 @@ def test_postgres_exporter_listens_locally_and_is_enabled():
     assert parser["Service"]["User"] == "postgres"
     assert "--web.listen-address=127.0.0.1:9187" in parser["Service"]["ExecStart"]
     install = (ROOT / "exordos/images/pg_install.sh").read_text()
-    assert "sudo systemctl enable exordos-postgres-exporter\n" in install
+    assert (
+        "sudo systemctl enable exordos-postgres-exporter "
+        "exordos-postgres-exporter-databases\n"
+    ) in install
+
+
+def test_database_exporter_only_collects_per_table_statistics():
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str  # type: ignore[assignment,method-assign]
+    parser.read(ROOT / "etc/systemd/exordos-postgres-exporter-databases.service")
+    main = configparser.ConfigParser(interpolation=None, strict=False)
+    main.optionxform = str  # type: ignore[assignment,method-assign]
+    main.read(ROOT / "etc/systemd/exordos-postgres-exporter.service")
+
+    args = parser["Service"]["ExecStart"].split()
+    main_args = main["Service"]["ExecStart"].split()
+
+    assert parser["Service"]["User"] == "postgres"
+    assert "--web.listen-address=127.0.0.1:9188" in args
+    assert {"--disable-default-metrics", "--disable-settings-metrics"} <= set(args)
+    # What one exporter leaves out, the other one collects
+    for collector in ("stat_user_tables", "statio_user_tables", "stat_progress_vacuum"):
+        assert f"--no-collector.{collector}" in main_args
+        assert f"--no-collector.{collector}" not in args
+    for collector in ("database", "stat_database", "locks", "wal"):
+        assert f"--no-collector.{collector}" in args
+        assert f"--no-collector.{collector}" not in main_args
 
 
 def _dashboard() -> dict:

@@ -16,10 +16,13 @@
 from __future__ import annotations
 
 from functools import wraps
+import json
 import logging
+import os
 import subprocess
 import time
 import typing as tp
+from urllib import parse as urlparse
 
 from gcl_sdk.agents.universal.drivers import meta
 from gcl_sdk.infra import constants as pc
@@ -48,6 +51,54 @@ BACKUP_UNSETTLED = {"state": "unsettled"}
 # stanza-create talks to the repository on every iteration until it
 # succeeds, the rest of the node waits for it meanwhile
 STANZA_CREATE_TIMEOUT = 60
+
+
+def database_scrape_targets(names: tp.Iterable[str]) -> list[dict[str, tp.Any]]:
+    """Return the vmagent file_sd targets of the per-database exporter.
+
+    The target is the database name, which vmagent replaces with the address
+    of the exporter; the DSN to probe goes in __param_target. It has to be a
+    URL: the exporter mangles the socket path of a key=value one. The
+    database label keeps apart the series every probe has, such as up; it
+    isn't datname, which the per-table series already carry.
+    """
+    return [
+        {
+            "targets": [name],
+            "labels": {
+                "database": name,
+                "__param_target": (
+                    f"postgresql://postgres@/{urlparse.quote(name, safe='')}"
+                    "?host=/var/run/postgresql&sslmode=disable"
+                ),
+            },
+        }
+        for name in sorted(names)
+    ]
+
+
+def write_database_scrape_targets(names: tp.Iterable[str]) -> bool:
+    """Write the file_sd file of the databases if it changed.
+
+    Every node writes it, a replica has the same databases as the primary.
+    Return whether the file changed.
+    """
+    content = json.dumps(database_scrape_targets(names), indent=2) + "\n"
+    path = constants.VMAGENT_DATABASES_SD_FILE
+    try:
+        with open(path) as f:
+            if f.read() == content:
+                return False
+    except FileNotFoundError:
+        pass
+
+    # vmagent may read it at any moment, so replace it at once
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w") as f:
+        f.write(content)
+    os.chmod(tmp_path, 0o644)
+    os.replace(tmp_path, path)
+    return True
 
 
 def get_ttl_hash(seconds=600):
@@ -327,6 +378,14 @@ WHERE d.datname not in """
         for aname, aowner in actual_dbs.items():
             self.databases[aname] = {"owner": aowner}
 
+    def _update_database_scrape_targets(self) -> None:
+        # Monitoring must not get in the way of the instance
+        try:
+            if write_database_scrape_targets(self.databases):
+                LOG.info("Scrape targets of the databases updated")
+        except OSError:
+            LOG.exception("Failed to write the scrape targets of the databases")
+
     def _reconcile_DCS(self, archiving: bool = True) -> None:
         sync_enabled = self.nodes_number > 1 and self.sync_replica_number
         tconfig: dict[str, tp.Any] = {
@@ -491,6 +550,7 @@ WHERE d.datname not in """
         self.databases = {}
         self._fill_actual_users()
         self._fill_actual_databases()
+        self._update_database_scrape_targets()
         config = self.c.pclient.config_get()
         self._fill_DCS(config)
         self._fill_backup(config)

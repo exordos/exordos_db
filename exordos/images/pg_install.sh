@@ -99,7 +99,8 @@ sudo ln -s /usr/lib/postgresql/$PG_VERSION/bin/* /usr/sbin/
 sudo apt -y install prometheus-postgres-exporter
 sudo systemctl disable --now prometheus-postgres-exporter
 sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter.service" $SYSTEMD_SERVICE_DIR
-sudo systemctl enable exordos-postgres-exporter
+sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter-databases.service" $SYSTEMD_SERVICE_DIR
+sudo systemctl enable exordos-postgres-exporter exordos-postgres-exporter-databases
 
 # Setup watchdog
 cat <<EOF | sudo tee /etc/udev/rules.d/99-watchdog.rules
