@@ -90,6 +90,13 @@ migrate_to_persistent() {
     [[ "$1" != "${FAIL_AT:-}" ]]
 }
 persist_migrate_complete() { record complete; }
+# The data as a previous image left it: the persistent paths exist, owned
+# by DATA_OWNER
+stat() {
+    [[ -n "${DATA_OWNER:-}" && "${@: -1}" == /persist/* ]] || return 1
+    printf '%s\n' "$DATA_OWNER"
+}
+id() { [[ "$1" == -u ]] && echo 102 || echo 109; }
 sudo() {
     record "$@"
     [[ "${FAIL_AT:-}" != stop || "$*" != 'systemctl stop exordos-patroni' ]]
@@ -97,13 +104,14 @@ sudo() {
 """
     )
 
-    def run(fail_at=""):
+    def run(fail_at="", data_owner=""):
         log.write_text("")
         env = dict(
             os.environ,
             EXORDOS_BOOTSTRAP_LIB=str(lib),
             CALL_LOG=str(log),
             FAIL_AT=fail_at,
+            DATA_OWNER=data_owner,
         )
         result = subprocess.run(
             ["bash", str(ROOT / "exordos/images/pg_bootstrap.sh")],
@@ -142,3 +150,19 @@ def test_failed_bootstrap_does_not_start_patroni_and_can_be_retried(bootstrap, f
     result, calls = bootstrap()
     assert result.returncode == 0, result.stderr
     assert calls[-1] == "systemctl enable --now exordos-patroni"
+
+
+def test_data_of_another_postgres_uid_is_taken_over(bootstrap):
+    # A newer base image gave postgres 102:109 where the data has 104:110
+    result, calls = bootstrap(data_owner="104 110")
+    assert result.returncode == 0, result.stderr
+    paths = f"/persist{DATA} /persist{RAFT} /persist/var/log/postgresql"
+    chown = f"find {paths} -uid 104 -exec chown -h postgres {{}} +"
+    chgrp = f"find {paths} -gid 110 -exec chgrp -h postgres {{}} +"
+    migrate = calls.index(f"migrate {DATA} /persist{DATA}")
+    assert calls.index(chown) < migrate
+    assert calls.index(chgrp) < migrate
+
+    result, calls = bootstrap(data_owner="102 109")
+    assert result.returncode == 0, result.stderr
+    assert not any(call.startswith("find /persist") for call in calls)
