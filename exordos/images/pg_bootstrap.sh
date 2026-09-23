@@ -27,11 +27,34 @@ source "$BOOTSTRAP_LIB"
 # Raft would leave open file descriptors on the filesystem being replaced.
 sudo systemctl stop exordos-patroni
 
+# A newer image may give postgres other ids than the ones the data on the
+# persistent disk was written with, and PostgreSQL refuses to start then.
+# What has the old ids of the data directory, the first path, gets the new
+# ones; anything else keeps its owner.
+restore_postgres_ownership() {
+    local ids uid gid path paths=()
+    ids=$(stat -c '%u %g' "$1" 2>/dev/null) || return 0
+    read -r uid gid <<< "$ids"
+    [[ "$uid:$gid" != "$(id -u postgres):$(id -g postgres)" ]] || return 0
+    for path in "$@"; do
+        if stat -c %u "$path" >/dev/null 2>&1; then
+            paths+=("$path")
+        fi
+    done
+    sudo find "${paths[@]}" -uid "$uid" -exec chown -h postgres {} +
+    sudo find "${paths[@]}" -gid "$gid" -exec chgrp -h postgres {} +
+}
+
 # persistent data routines
 PERSISTENT_DISK=$(find_persistent_disk)
 prepare_persistent_disk "$PERSISTENT_DISK" "$PERSISTENT_MOUNT"
 
 if [[ -n "$PERSISTENT_DISK" ]]; then
+    restore_postgres_ownership \
+        "${PERSISTENT_MOUNT}/var/lib/postgresql/patroni/data" \
+        "${PERSISTENT_MOUNT}/var/lib/postgresql/patroni/raft" \
+        "${PERSISTENT_MOUNT}/var/log/postgresql"
+
     # Migrate logs first, some processes may be left writing to root disk until next reboot
     migrate_to_persistent_restart "/var/log" "${PERSISTENT_MOUNT}/var/log" "systemd-journald rsyslog"
 
