@@ -212,8 +212,12 @@ def remove_restore_config() -> bool:
 
 
 def error_text(error: BaseException | str) -> str:
-    """Shorten an error to report it to the control plane."""
-    text = str(error).strip()
+    """Shorten an error to report it to the control plane.
+
+    Only the first line: pgBackRest follows an HTTP error with the request
+    and the response, of an endpoint the user may have pointed anywhere.
+    """
+    text = str(error).strip().split("\n", 1)[0]
     return text if len(text) <= ERROR_MAX_LENGTH else f"{text[:ERROR_MAX_LENGTH]}..."
 
 

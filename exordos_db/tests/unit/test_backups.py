@@ -463,3 +463,14 @@ class TestArchiveGap:
 
     def test_nothing_to_check_without_a_backup(self, repository):
         assert pgbackrest.archive_gap("st", {"backup": [], "archive": []}) == []
+
+
+def test_error_is_reported_without_the_http_exchange():
+    error = pgbackrest.PgBackRestError(
+        "restore failed with code 39: ERROR: [039]: HTTP request failed with 403\n"
+        "*** Response Content ***:\n<secret>"
+    )
+
+    assert pgbackrest.error_text(error) == (
+        "restore failed with code 39: ERROR: [039]: HTTP request failed with 403"
+    )
