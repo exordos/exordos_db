@@ -39,10 +39,12 @@ jobs:
   # and the data plane both, and the check waits for that instance.
   Test:
     needs: Build
-    uses: exordos/exordos_tests/.github/workflows/element_realm_test.yml@master
+    uses: exordos/exordos_tests/.github/workflows/element_realm_test.yml@realm_prepare_script
     with:
       elements: dbaas communal_pg_cluster
       version: ${{ needs.Build.outputs.version }}
       element-timeout: 1140
+      prepare-script: .github/scripts/overbook-hypervisor.sh
       check-script: .github/scripts/check-communal-pg-cluster.sh
+      tests-ref: realm_prepare_script
     secrets: inherit
