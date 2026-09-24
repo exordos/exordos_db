@@ -39,11 +39,10 @@ jobs:
   # and the data plane both, and the check waits for that instance.
   Test:
     needs: Build
-    uses: exordos/exordos_tests/.github/workflows/element_realm_test.yml@element_realm_workflow
+    uses: exordos/exordos_tests/.github/workflows/element_realm_test.yml@master
     with:
       elements: dbaas communal_pg_cluster
       version: ${{ needs.Build.outputs.version }}
       element-timeout: 1140
       check-script: .github/scripts/check-communal-pg-cluster.sh
-      tests-ref: element_realm_workflow
     secrets: inherit
