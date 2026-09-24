@@ -38,7 +38,8 @@ jobs:
           VERSION="$(exordos get-version .)"
           echo "dbaas_version=${VERSION}" >> $GITHUB_OUTPUT
           
-          exordos build $(pwd)
+          # Build both element images (exordos-db, exordos-db-pg) in parallel
+          exordos build -j 2 $(pwd)
 
           # Decode and write the push configuration
           echo "$PUSH_CFG" | base64 -d > exordos/exordos.push.yaml
