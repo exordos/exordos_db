@@ -2,6 +2,10 @@ name: build
 
 on:
   push:
+    branches-ignore:
+      - master
+    tags:
+      - '*'
 
 env:
   # Space-separated list of elements to install as dependencies
