@@ -6,16 +6,11 @@ on:
 env:
   # Space-separated list of elements to install as dependencies
   ELEMENT_DEPS: ""
-  PROJECT_ID: ${{ secrets.TEST_PROJECT_ID }}
-  USERNAME: ${{ secrets.TEST_USERNAME }}
-  USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
-  ENDPOINT: https://exordos.com/api/core
   ELEMENT_NAME: dbaas
   # Built alongside dbaas with the same version: a PG instance ordered through
   # dbaas, so installing it runs the control plane and the data plane both.
   CLUSTER_ELEMENT_NAME: communal_pg_cluster
   CLUSTER_INSTANCE_NAME: communal-pg-cluster
-  REALM_TTL_HOURS: "2"
 
 jobs:
   Build:
@@ -50,6 +45,13 @@ jobs:
     if : ${{ github.actor != 'dependabot[bot]' }}
     env:
       DBAAS_VERSION: ${{ needs.Build.outputs.dbaas_version }}
+      # Only this job talks to the realm pool: the Build job on the
+      # self-hosted runner has no use for the credentials.
+      PROJECT_ID: ${{ secrets.TEST_PROJECT_ID }}
+      USERNAME: ${{ secrets.TEST_USERNAME }}
+      USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+      ENDPOINT: https://exordos.com/api/core
+      REALM_TTL_HOURS: "2"
     steps:
       - name: Install exordos
         run: curl -fsSL https://repo.exordos.com/install.sh | sh
