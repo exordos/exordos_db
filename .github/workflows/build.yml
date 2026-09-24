@@ -43,7 +43,7 @@ jobs:
     with:
       elements: dbaas communal_pg_cluster
       version: ${{ needs.Build.outputs.version }}
-      element-timeout: 1140
+      element-timeout: 600
       prepare-script: .github/scripts/overbook-hypervisor.sh
       check-script: .github/scripts/check-communal-pg-cluster.sh
     secrets: inherit

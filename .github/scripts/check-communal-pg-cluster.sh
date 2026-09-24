@@ -10,7 +10,7 @@
 set -uo pipefail
 
 instance="communal-pg-cluster"
-timeout="${1:-900}"
+timeout="${1:-600}"
 
 deadline=$((SECONDS + timeout))
 status=""
