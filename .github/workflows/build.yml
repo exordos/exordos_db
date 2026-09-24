@@ -6,11 +6,12 @@ on:
 env:
   # Space-separated list of elements to install as dependencies
   ELEMENT_DEPS: ""
-  PACKER_VERSION: "1.9.2"
-  CORE_ENDPOINT_URL: http://10.20.0.2:80/api/core
-  CORE_USERNAME: "admin"
-  CORE_PASSWORD: "admin"
+  PROJECT_ID: ${{ secrets.TEST_PROJECT_ID }}
+  USERNAME: ${{ secrets.TEST_USERNAME }}
+  USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+  ENDPOINT: https://exordos.com/api/core
   ELEMENT_NAME: dbaas
+  REALM_TTL_HOURS: "2"
 
 jobs:
   Build:
@@ -33,7 +34,7 @@ jobs:
 
           VERSION="$(exordos get-version .)"
           echo "dbaas_version=${VERSION}" >> $GITHUB_OUTPUT
-          
+
           exordos build $(pwd)
 
           # Decode and write the push configuration
@@ -46,61 +47,84 @@ jobs:
     env:
       DBAAS_VERSION: ${{ needs.Build.outputs.dbaas_version }}
     steps:
-      - name: Setup `packer`
-        uses: hashicorp/setup-packer@main
-        with:
-          version: ${{ env.PACKER_VERSION }}
       - name: Install exordos
-        run: curl -fsSL https://repo.exordos.com/install.sh | sudo sh
-      - name: Install hypervisor
-        run: |
-          set -eux
-
-          # Prefetch the core artifacts into ~/.cache/exordos while the
-          # hypervisor packages are being installed: both steps are
-          # independent and each takes around half a minute.
-          exordos bootstrap -i latest -m core --download-only > prefetch.log 2>&1 &
-          PREFETCH_PID=$!
-
-          sudo exordos compute hypervisors init --connection-uri qemu+tcp://10.20.0.1/system
-          sudo chmod 666 /dev/kvm
-          
-          wait $PREFETCH_PID || { cat prefetch.log; exit 1; }
-          cat prefetch.log
-      - uses: actions/checkout@v7
+        run: curl -fsSL https://repo.exordos.com/install.sh | sh
+      - name: Checkout the realm scripts
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-      - name: set exordos config
+          repository: exordos/exordos_tests
+          path: exordos_tests
+      - name: get_realm
+        timeout-minutes: 15
+        working-directory: exordos_tests
         run: |
-          exordos settings set-realm default --endpoint $CORE_ENDPOINT_URL
-          exordos settings set-context default --name default --user $CORE_USERNAME --password $CORE_PASSWORD
-      - name: Bootstrap exordos_core
-        run:
-          exordos bootstrap -i latest -f -m core --admin-password $CORE_PASSWORD --cidr 10.20.0.0/22
-      - name: Wait for Exordos Core API
+          set -euo pipefail
+
+          REALM_NAME="dbaas-build-${{ github.run_id }}"
+          echo "REALM_NAME=$REALM_NAME" >> "$GITHUB_ENV"
+
+          got="$(.github/scripts/get-realm.sh "$REALM_NAME" "$REALM_TTL_HOURS")"
+
+          echo "::add-mask::$(echo "$got" | sed -n 's/^ADMIN_PASSWORD=//p')"
+          echo "$got" >> "$GITHUB_ENV"
+          echo "$got" | grep -v '^ADMIN_PASSWORD='
+      - name: wait_for_realm_api
+        timeout-minutes: 10
         run: |
-          set -eux
-          
-          for i in {1..60}; do
-            if exordos ready_api; then
-              echo "Exordos Core API is ready"
-              break
-            fi
-            if [ "$i" -eq 60 ]; then
-              echo "Exordos Core API did not become ready"
-              exit 1
-            fi
-            echo "Waiting for Exordos Core API... ($i/60)"
-            sleep 2
+          set -uo pipefail
+
+          for i in $(seq 1 60); do
+              for scheme in https http; do
+                  url="$scheme://$REALM_DOMAIN/api/core"
+                  if exordos --endpoint "$url" --user admin \
+                             --password "$ADMIN_PASSWORD" \
+                             ready_api > /dev/null 2>&1; then
+                      echo "REALM_CORE_URL=$url" >> "$GITHUB_ENV"
+                      echo "The realm's core answered at $url"
+                      exit 0
+                  fi
+              done
+              echo "Waiting for the realm's core api... ($i/60)"
+              sleep 5
           done
-          
-          while [ $(exordos ee l -o json -f name=core | jq -r .[0]."status") != "ACTIVE" ]; do
-            sleep 2
-          done
-      - name: Set hypervisor with overbooking
+
+          echo "The realm's core answered on neither https nor http at" >&2
+          echo "$REALM_DOMAIN" >&2
+          exit 1
+      - name: point_cli_at_the_realm
         run: |
-          HYPER_UUID="$(exordos c h l -o json | jq -r .[0]."uuid")"
-          exordos compute hypervisors update $HYPER_UUID --cores-ratio 10.0 --ram-ratio 10.0
+          set -euo pipefail
+
+          exordos settings set-realm default --endpoint "$REALM_CORE_URL"
+          exordos settings set-context default --name default \
+              --user admin --password "$ADMIN_PASSWORD"
+      - name: wait_for_pushed_version
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+
+          # The realm's repositories sync lazily, so the version pushed by the
+          # Build job is not in its catalog until a refresh picks it up.
+          # Refresh on every round: the push may still be reaching the repo's
+          # mirror.
+          for i in $(seq 1 60); do
+              exordos repo refresh || true
+              status="$(exordos repo e l --dev -f "name=$ELEMENT_NAME" -o json \
+                  2>/dev/null | jq -r --arg v "$DBAAS_VERSION" \
+                  '[.[] | select(.version == $v) | .status] | first // ""' \
+                  2>/dev/null || true)"
+              if [ "$status" = "AVAILABLE" ]; then
+                  echo "$ELEMENT_NAME $DBAAS_VERSION is available in the realm"
+                  exit 0
+              fi
+              echo "Waiting for $ELEMENT_NAME $DBAAS_VERSION... (${status:-not listed}, $i/60)"
+              sleep 10
+          done
+
+          echo "$ELEMENT_NAME $DBAAS_VERSION never became available in the realm" >&2
+          exordos repo l >&2 || true
+          exordos repo e l --dev -f "name=$ELEMENT_NAME" >&2 || true
+          exit 1
       - name: Preload dependencies in background
         run: |
           for dep in $ELEMENT_DEPS; do
@@ -108,20 +132,41 @@ jobs:
           done
       - name: install dbaas
         run: |
-          exordos e e install $ELEMENT_NAME -v $DBAAS_VERSION
+          set -eux
+
+          exordos e e install "$ELEMENT_NAME" -v "$DBAAS_VERSION"
       - name: check exordos dbaas
         timeout-minutes: 10
         run: |
           set -eux
 
-          while [ $(exordos ee l -o json -f name=$ELEMENT_NAME | jq -r .[0]."status") != "ACTIVE" ]; do
-            sleep 5
-          done
+          exordos_tests/.github/scripts/wait-for-element.sh "$ELEMENT_NAME" 540
 
-          exordos e e show $ELEMENT_NAME
+          installed="$(exordos ee l -o json -f "name=$ELEMENT_NAME" | jq -r '.[0].version')"
+          if [ "$installed" != "$DBAAS_VERSION" ]; then
+              echo "Installed $installed instead of $DBAAS_VERSION" >&2
+              exit 1
+          fi
+
+          exordos e e show "$ELEMENT_NAME"
       - name: Setup upterm session
         uses: owenthereal/action-upterm@v1
         if: ${{ failure() }}
         with:
           limit-access-to-actor: true
           wait-timeout-minutes: 15
+      - name: delete_realm
+        if: ${{ always() }}
+        run: |
+          set -eux
+
+          # Fall back to the name: an ordered realm that never came up leaves
+          # get-realm.sh without printing its uuid, and it has no TTL.
+          realm="${REALM_UUID:-${REALM_NAME:-}}"
+          if [ -z "$realm" ]; then
+              echo "No realm was claimed, nothing to delete"
+              exit 0
+          fi
+          exordos --endpoint "$ENDPOINT" --project-id "$PROJECT_ID" \
+              --user "$USERNAME" --password "$USER_PASSWORD" \
+              realms delete "$realm"
