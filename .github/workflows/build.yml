@@ -11,6 +11,10 @@ env:
   USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
   ENDPOINT: https://exordos.com/api/core
   ELEMENT_NAME: dbaas
+  # Built alongside dbaas with the same version: a PG instance ordered through
+  # dbaas, so installing it runs the control plane and the data plane both.
+  CLUSTER_ELEMENT_NAME: communal_pg_cluster
+  CLUSTER_INSTANCE_NAME: communal-pg-cluster
   REALM_TTL_HOURS: "2"
 
 jobs:
@@ -107,23 +111,34 @@ jobs:
           # Build job is not in its catalog until a refresh picks it up.
           # Refresh on every round: the push may still be reaching the repo's
           # mirror.
+          pending="$ELEMENT_NAME $CLUSTER_ELEMENT_NAME"
           for i in $(seq 1 60); do
               exordos repo refresh || true
-              status="$(exordos repo e l --dev -f "name=$ELEMENT_NAME" -o json \
-                  2>/dev/null | jq -r --arg v "$DBAAS_VERSION" \
-                  '[.[] | select(.version == $v) | .status] | first // ""' \
-                  2>/dev/null || true)"
-              if [ "$status" = "AVAILABLE" ]; then
-                  echo "$ELEMENT_NAME $DBAAS_VERSION is available in the realm"
+              still=""
+              for name in $pending; do
+                  status="$(exordos repo e l --dev -f "name=$name" -o json \
+                      2>/dev/null | jq -r --arg v "$DBAAS_VERSION" \
+                      '[.[] | select(.version == $v) | .status] | first // ""' \
+                      2>/dev/null || true)"
+                  if [ "$status" = "AVAILABLE" ]; then
+                      echo "$name $DBAAS_VERSION is available in the realm"
+                  else
+                      echo "Waiting for $name $DBAAS_VERSION... (${status:-not listed}, $i/60)"
+                      still="$still $name"
+                  fi
+              done
+              pending="$still"
+              if [ -z "$pending" ]; then
                   exit 0
               fi
-              echo "Waiting for $ELEMENT_NAME $DBAAS_VERSION... (${status:-not listed}, $i/60)"
               sleep 10
           done
 
-          echo "$ELEMENT_NAME $DBAAS_VERSION never became available in the realm" >&2
+          echo "Never became available in the realm:$pending" >&2
           exordos repo l >&2 || true
-          exordos repo e l --dev -f "name=$ELEMENT_NAME" >&2 || true
+          for name in $pending; do
+              exordos repo e l --dev -f "name=$name" >&2 || true
+          done
           exit 1
       - name: Preload dependencies in background
         run: |
@@ -149,6 +164,55 @@ jobs:
           fi
 
           exordos e e show "$ELEMENT_NAME"
+      - name: install communal_pg_cluster
+        run: |
+          set -eux
+
+          exordos e e install "$CLUSTER_ELEMENT_NAME" -v "$DBAAS_VERSION"
+      - name: check communal_pg_cluster
+        timeout-minutes: 20
+        run: |
+          set -eux
+
+          exordos_tests/.github/scripts/wait-for-element.sh "$CLUSTER_ELEMENT_NAME" 1140
+
+          installed="$(exordos ee l -o json -f "name=$CLUSTER_ELEMENT_NAME" | jq -r '.[0].version')"
+          if [ "$installed" != "$DBAAS_VERSION" ]; then
+              echo "Installed $installed instead of $DBAAS_VERSION" >&2
+              exit 1
+          fi
+
+          exordos e e show "$CLUSTER_ELEMENT_NAME"
+      - name: check the pg instance
+        timeout-minutes: 15
+        run: |
+          set -uo pipefail
+
+          # dbaas' own view of the instance the element ordered: its status
+          # follows the node set that runs postgres, so ACTIVE means the data
+          # plane nodes came up, not only that dbaas accepted the resource.
+          for i in $(seq 1 90); do
+              status="$(exordos dbaas i l -f "name=$CLUSTER_INSTANCE_NAME" -o json \
+                  2>/dev/null | jq -r '.[0].status // ""' 2>/dev/null || true)"
+              case "$status" in
+                  ACTIVE)
+                      echo "PG instance $CLUSTER_INSTANCE_NAME is ACTIVE"
+                      exordos dbaas i l
+                      exit 0
+                      ;;
+                  ERROR)
+                      echo "PG instance $CLUSTER_INSTANCE_NAME went ERROR" >&2
+                      exordos dbaas i l >&2 || true
+                      exit 1
+                      ;;
+              esac
+              echo "Waiting for PG instance $CLUSTER_INSTANCE_NAME... (${status:-not listed}, $i/90)"
+              sleep 10
+          done
+
+          echo "PG instance $CLUSTER_INSTANCE_NAME never became ACTIVE" >&2
+          exordos dbaas i l >&2 || true
+          exit 1
       - name: Setup upterm session
         uses: owenthereal/action-upterm@v1
         if: ${{ failure() }}
