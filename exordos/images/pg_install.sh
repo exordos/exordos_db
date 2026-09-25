@@ -34,6 +34,20 @@ SDK_DEV_MODE=$([ -d "$DEV_SDK_PATH" ] && echo "true" || echo "false")
 
 PG_VERSION="18"
 
+# unattended-upgrades may hold the dpkg lock right after boot. Make every apt
+# call, including those of third-party scripts, wait for the lock instead of
+# failing. The setting is removed on exit to keep the image defaults.
+APT_LOCK_CFG=/etc/apt/apt.conf.d/99-exordos-lock-timeout
+echo 'DPkg::Lock::Timeout "600";' | sudo tee "$APT_LOCK_CFG"
+trap 'sudo rm -f "$APT_LOCK_CFG"' EXIT
+
+# apt update takes the lists lock without waiting, so DPkg::Lock::Timeout does
+# not help there. Wait for the boot-time apt jobs to finish first.
+sudo systemd-run --wait --quiet \
+    --property=After=apt-daily.service \
+    --property=After=apt-daily-upgrade.service \
+    /bin/true
+
 # Install packages
 sudo apt update
 sudo apt install -y \
