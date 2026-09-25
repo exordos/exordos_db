@@ -161,6 +161,11 @@ def instance_status(instance: models.PGInstance, nodeset_status: str) -> str:
         return sdk_c.InstanceStatus.IN_PROGRESS.value
 
 
+def patroni_scope(instance: models.PGInstance) -> str:
+    """The path of the cluster in the DCS, kept when the instance is renamed."""
+    return str(instance.uuid)
+
+
 def bootstrap_method(instance: models.PGInstance) -> str:
     return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
 
@@ -288,7 +293,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
         # Just recreate configs, it'll be updated in DB if already exist
         for node_uuid, node in nodeset.nodes.items():
             content = PATRONI_CONF_TEMPLATE.format(
-                cluster_name=instance.name,
+                cluster_name=patroni_scope(instance),
                 node_name=node_uuid,
                 node_ip=node["ipv4"],
                 raft_partner_addrs=node_raft_members,
