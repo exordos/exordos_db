@@ -17,6 +17,7 @@
 
 import json
 import logging
+import subprocess
 import sys
 import time
 
@@ -45,6 +46,18 @@ def main() -> int:
         LOG.info("Stanza %s is not ready yet", spec["stanza"])
         return 0
 
+    try:
+        _backup_if_due(spec)
+    except (pgbackrest.PgBackRestError, subprocess.TimeoutExpired) as e:
+        LOG.error("Backup of %s failed: %s", spec["stanza"], e)
+        # Reported to the API until a run succeeds
+        pgbackrest.save_backup_error(e)
+        return 1
+    pgbackrest.clear_backup_error()
+    return 0
+
+
+def _backup_if_due(spec: dict) -> None:
     stanza = spec["stanza"]
     info = json.loads(pgbackrest.run(stanza, "--output=json", "info"))
     backups = info[0].get("backup", []) if info else []
@@ -60,12 +73,11 @@ def main() -> int:
         backup_type = "incr"
     if backup_type is None:
         LOG.info("No backup is due")
-        return 0
+        return
 
     LOG.info("Taking a %s backup of %s", backup_type, stanza)
     pgbackrest.run(stanza, f"--type={backup_type}", "backup", timeout=None)
     LOG.info("The %s backup of %s is done", backup_type, stanza)
-    return 0
 
 
 if __name__ == "__main__":

@@ -72,6 +72,20 @@ def restore_status(
     return next((r for r in reports if not r["error"]), reports[0])
 
 
+def backup_status(
+    instance: models.PGInstance,
+    actuals: tp.Iterable[models.PGInstanceNode | None],
+) -> dict[str, tp.Any] | None:
+    """Take what the primary reports about the backups."""
+    if instance.backup is None:
+        return None
+    for actual in actuals:
+        if actual is not None and actual.backup_state is not None:
+            return actual.backup_state
+    # No primary reports meanwhile, e.g. during a failover
+    return instance.backup_status
+
+
 class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
     def __init__(
         self,
@@ -193,12 +207,23 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             instance.restore_status = status
             instance.update(force=True)
 
+    @staticmethod
+    def _update_backup_status(
+        instance: models.PGInstance,
+        paas_collection: builder.PaaSCollection,
+    ) -> None:
+        status = backup_status(instance, paas_collection.actuals())
+        if status != instance.backup_status:
+            instance.backup_status = status
+            instance.update(force=True)
+
     def actualize_paas_objects_source_data_plane(
         self,
         instance: models.PGInstance,
         paas_collection: builder.PaaSCollection,
     ) -> tp.Collection[ua_models.TargetResourceKindAwareMixin]:
         self._update_restore_status(instance, paas_collection)
+        self._update_backup_status(instance, paas_collection)
         if not self._roles_managed(instance):
             self._import_roles(instance, paas_collection)
         return super().actualize_paas_objects_source_data_plane(

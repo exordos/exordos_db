@@ -32,7 +32,7 @@ SPEC = {
 @pytest.fixture
 def backups(monkeypatch):
     """The backups taken; `gap` is what the archive lacks."""
-    taken = types.SimpleNamespace(types=[], gap=[])
+    taken = types.SimpleNamespace(types=[], gap=[], fail=None, error="old")
     info = [
         {
             "backup": [
@@ -42,6 +42,8 @@ def backups(monkeypatch):
     ]
 
     def run(stanza, *args, timeout=600):
+        if taken.fail is not None:
+            raise pgbackrest.PgBackRestError(taken.fail)
         if args[-1] == "info":
             return json.dumps(info)
         taken.types.append(args[0])
@@ -51,6 +53,12 @@ def backups(monkeypatch):
     monkeypatch.setattr(pgbackrest, "stanza_ready", lambda spec: True)
     monkeypatch.setattr(pgbackrest, "run", run)
     monkeypatch.setattr(pgbackrest, "archive_gap", lambda stanza, info: taken.gap)
+    monkeypatch.setattr(
+        pgbackrest, "save_backup_error", lambda e: setattr(taken, "error", str(e))
+    )
+    monkeypatch.setattr(
+        pgbackrest, "clear_backup_error", lambda: setattr(taken, "error", None)
+    )
     monkeypatch.setattr(
         pg_backup.pg,
         "PatroniClient",
@@ -71,3 +79,17 @@ def test_missing_wal_takes_a_backup(backups):
     assert pg_backup.main() == 0
 
     assert backups.types == ["--type=incr"]
+
+
+def test_success_clears_the_error(backups):
+    assert pg_backup.main() == 0
+
+    assert backups.error is None
+
+
+def test_unreachable_repository_is_reported(backups):
+    backups.fail = "ERROR: [039]: HTTP request failed with 403 (Forbidden)"
+
+    assert pg_backup.main() == 1
+
+    assert backups.error == backups.fail

@@ -52,6 +52,10 @@ RESTORE_CONF_FILE = f"{cc.PATRONI_DIR}/pgbackrest-restore.conf"
 # The progress of the restore a cluster is bootstrapped with, see
 # exordos_db.cmd.pg_restore; removed once the node is a primary
 RESTORE_STATE_FILE = f"{cc.PATRONI_DIR}/exordos_restore_state.json"
+# Why the last attempt to reach the repository failed: the agent creating
+# the stanza or the backup timer. In a directory of postgres, so both may
+# replace it; the first line of a pgBackRest error only, no credentials.
+BACKUP_ERROR_FILE = f"{cc.PATRONI_DIR}/exordos_backup_error.txt"
 # Errors reach the API, a pgBackRest error may be long
 ERROR_MAX_LENGTH = 1024
 # Fingerprint of the repository the stanza was created in on this node
@@ -227,6 +231,18 @@ def error_text(error: BaseException | str) -> str:
     """
     text = str(error).strip().split("\n", 1)[0]
     return text if len(text) <= ERROR_MAX_LENGTH else f"{text[:ERROR_MAX_LENGTH]}..."
+
+
+def load_backup_error() -> str | None:
+    return _read(BACKUP_ERROR_FILE)
+
+
+def save_backup_error(error: BaseException | str) -> None:
+    _write(BACKUP_ERROR_FILE, error_text(error), 0o644, None)
+
+
+def clear_backup_error() -> bool:
+    return _remove(BACKUP_ERROR_FILE)
 
 
 def load_restore_state() -> dict[str, tp.Any] | None:

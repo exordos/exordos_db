@@ -64,6 +64,36 @@ def test_restore_in_progress_wins_over_a_failed_one():
     }
 
 
+def _backup_node(backup_state):
+    return paas_models.PGInstanceNode(
+        uuid=uuid.uuid4(), name="backed-up", backup_state=backup_state
+    )
+
+
+def test_backup_status_is_what_the_primary_reports():
+    instance = types.SimpleNamespace(backup={"kind": "s3"}, backup_status=None)
+    error = {"error": "HTTP request failed with 403 (Forbidden)"}
+
+    status = paas_builder.backup_status(
+        instance, [None, _backup_node(None), _backup_node(error)]
+    )
+
+    assert status == error
+
+
+def test_backup_status_is_kept_while_no_primary_reports():
+    kept = {"error": "unreachable"}
+    instance = types.SimpleNamespace(backup={"kind": "s3"}, backup_status=kept)
+
+    assert paas_builder.backup_status(instance, [_backup_node(None)]) == kept
+
+
+def test_no_backup_status_without_backups():
+    instance = types.SimpleNamespace(backup=None, backup_status={"error": "x"})
+
+    assert paas_builder.backup_status(instance, [_backup_node({"error": "x"})]) is None
+
+
 def _instance(**fields):
     return models.PGInstance(
         name="restored",

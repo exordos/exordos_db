@@ -103,6 +103,9 @@ class PGInstance(
     # {"phase": ..., "error": ...} of the restore of a new instance as its
     # nodes report it, None when there is none in progress
     restore_status = properties.property(types.AllowNone(types.Dict()), default=None)
+    # {"error": ...} of the backups as the primary reports it, None while
+    # backups are off or before the primary has reported
+    backup_status = properties.property(types.AllowNone(types.Dict()), default=None)
 
     def restore_failed(self) -> bool:
         return self.restore_status is not None and bool(self.restore_status["error"])

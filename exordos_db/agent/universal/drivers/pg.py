@@ -171,6 +171,11 @@ class PGInstance(meta.MetaDataPlaneModel):
     restore_state = properties.property(
         ra_types.AllowNone(ra_types.Dict()), default=None
     )
+    # {"error": ...} of the repository as the primary uses it, None on a
+    # replica or without backups. Not a target field, like found_roles.
+    backup_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     _meta_fields: tp.ClassVar[set[str]] = {
         "uuid",
@@ -356,12 +361,14 @@ WHERE d.datname not in """
                 "stanza-create",
                 timeout=STANZA_CREATE_TIMEOUT,
             )
-        except (pgbackrest.PgBackRestError, subprocess.TimeoutExpired):
+        except (pgbackrest.PgBackRestError, subprocess.TimeoutExpired) as e:
             # The repository doesn't hold the rest of the node up; the
             # backup stays unsettled, so this is retried
             LOG.exception("Failed to create stanza %s", self.backup["stanza"])
+            pgbackrest.save_backup_error(e)
             return False
 
+        pgbackrest.clear_backup_error()
         pgbackrest.mark_stanza_ready(self.backup)
         LOG.info("Stanza %s created", self.backup["stanza"])
         return True
@@ -394,8 +401,19 @@ WHERE d.datname not in """
             self._apply()
         # A node that hasn't converged to the target isn't read back: the
         # agent reports the created or updated target, so the progress has
-        # to be on it
+        # to be on it. A repository that fails keeps it from converging.
         self.restore_state = self._bootstrap_state()
+        self.backup_state = self._backup_state()
+
+    def _backup_state(self) -> dict[str, tp.Any] | None:
+        if pgbackrest.load_spec() is None:
+            return None
+        try:
+            if not self.c.pclient.is_primary(get_ttl_hash(seconds=20)):
+                return None
+        except requests.RequestException:
+            return None
+        return {"error": pgbackrest.load_backup_error()}
 
     def _apply(self) -> None:
         primary = self.c.pclient.is_primary(get_ttl_hash(seconds=20))
@@ -407,6 +425,8 @@ WHERE d.datname not in """
         # Every node keeps the config, any of them may become the primary
         if pgbackrest.apply_spec(self.backup):
             LOG.info("Backup config updated")
+            # Of the repository used before; the new one is tried anew
+            pgbackrest.clear_backup_error()
         if self.backup is None:
             pgbackrest.mark_stanza_ready(None)
 
@@ -456,6 +476,7 @@ WHERE d.datname not in """
         # The restore in progress is all there is to report, PostgreSQL may
         # well be down
         self.restore_state = self._bootstrap_state()
+        self.backup_state = self._backup_state()
         if self.restore_state is not None:
             self.found_roles = None
             return

@@ -74,6 +74,7 @@ class PGInstanceController(
                 "ipsv4": {constants.ALL: field_p.Permissions.RO},
                 "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
                 "restore_status": {constants.ALL: field_p.Permissions.RO},
+                "backup_status": {constants.ALL: field_p.Permissions.RO},
             },
         ),
     )

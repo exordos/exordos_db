@@ -58,6 +58,10 @@ class PGInstanceNode(
     restore_state = properties.property(
         ra_types.AllowNone(ra_types.Dict()), default=None
     )
+    # Reported by the primary while backups are on, not a target field
+    backup_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     @classmethod
     def get_resource_kind(cls) -> str:

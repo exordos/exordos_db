@@ -187,6 +187,25 @@ Archiving is turned on only once the stanza is created; until then users,
 databases and replication settings are applied as usual, and the agent keeps
 retrying.
 
+The read-only `backup_status` of the instance tells whether the storage can
+be used, as the primary finds it:
+
+```json
+{
+  "backup_status": {
+    "error": "ERROR: [039]: HTTP request failed with 403 (Forbidden) ..."
+  }
+}
+```
+
+- `error` is why the last attempt failed: the agent creating the stanza, the
+  timer reading the backups or taking one. Wrong credentials, a missing
+  bucket or an unreachable storage show up here. It is `null` once an attempt
+  succeeds, and is cleared when `backup` changes.
+- `backup_status` is `null` while backups are off or before the primary has
+  reported. The API leaves out fields that are `null`, so a working storage
+  gives `{}`.
+
 WAL can go missing from the archive: a primary that goes down before it has
 archived its last segments, WAL dropped while the storage was unreachable.
 Nothing past a missing segment can be restored until a backup is taken past

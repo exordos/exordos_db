@@ -17,6 +17,7 @@
 import uuid
 
 from gcl_sdk.agents.universal.dm import models as ua_models
+import pytest
 import requests
 
 from exordos_db.agent.universal.drivers import pg
@@ -49,14 +50,21 @@ def test_adopt_roles_is_reported_only_while_sent():
     assert "adopt_roles" in adopting.get_meta_fields()
 
 
-def test_found_roles_change_the_full_hash_only():
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("found_roles", {"users": {"app": {"pw_hash": "x"}}, "databases": {}}),
+        ("backup_state", {"error": "HTTP request failed with 403 (Forbidden)"}),
+    ],
+)
+def test_reports_change_the_full_hash_only(field, value):
     # The agent reports a resource read from the data plane only while its
     # target hash matches; the control plane learns about the data plane
     # from the full hash. The found roles have to travel that way.
     resource = ua_models.Resource.from_value(ADOPTING, "pg_instance_node")
     empty = pg.PGInstance.from_ua_resource(resource)
     found = pg.PGInstance.from_ua_resource(resource)
-    found.found_roles = {"users": {"app": {"pw_hash": "x"}}, "databases": {}}
+    setattr(found, field, value)
 
     empty_resource = empty.to_ua_resource("pg_instance_node")
     found_resource = found.to_ua_resource("pg_instance_node")
@@ -200,6 +208,7 @@ class FakeRepository:
         self.ready = stanza_ready
         self.spec = spec
         self.restore_state = restore_state
+        self.error = None
         self.calls = []
         for name in (
             "apply_spec",
@@ -210,6 +219,9 @@ class FakeRepository:
             "load_spec",
             "load_restore_state",
             "remove_restore_state",
+            "load_backup_error",
+            "save_backup_error",
+            "clear_backup_error",
         ):
             monkeypatch.setattr(pg.pgbackrest, name, getattr(self, name))
 
@@ -241,6 +253,17 @@ class FakeRepository:
     def remove_restore_state(self):
         removed = self.restore_state is not None
         self.restore_state = None
+        return removed
+
+    def load_backup_error(self):
+        return self.error
+
+    def save_backup_error(self, error):
+        self.error = str(error)
+
+    def clear_backup_error(self):
+        removed = self.error is not None
+        self.error = None
         return removed
 
 
@@ -416,3 +439,36 @@ def test_replica_of_another_bootstrap_drops_its_failed_one(monkeypatch):
 
     assert instance.restore_state is None
     assert repository.restore_state is None
+
+
+def test_stanza_error_is_reported_by_the_primary(monkeypatch):
+    repository = FakeRepository(monkeypatch, reachable=False, spec=SPEC)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), SPEC)
+
+    instance.dump_to_dp()
+
+    assert instance.backup_state == {"error": "stanza-create failed"}
+
+    repository.reachable = True
+    instance.dump_to_dp()
+
+    assert instance.backup_state == {"error": None}
+
+
+def test_replica_reports_no_backup_state(monkeypatch):
+    repository = FakeRepository(monkeypatch, spec=SPEC)
+    repository.error = "stale"
+    instance = _managed_node(FakePsql(), FakePatroni(primary=False), SPEC)
+
+    instance.dump_to_dp()
+
+    assert instance.backup_state is None
+
+
+def test_no_backup_state_without_backups(monkeypatch):
+    FakeRepository(monkeypatch)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), None)
+
+    instance.dump_to_dp()
+
+    assert instance.backup_state is None
