@@ -109,8 +109,9 @@ mkdir -p patroni
 cd patroni
 python3 -m venv venv
 source venv/bin/activate
+# 0.3.17 carries the fix of the startup deadlock after a crash,
 # https://github.com/bakwc/PySyncObj/pull/197
-pip install "psycopg[binary]" "patroni[raft]>=4.1.0" "git+https://github.com/gmelikov/PySyncObj.git@reset_fix"
+pip install "psycopg[binary]" "patroni[raft]>=4.1.0" "pysyncobj>=0.3.17"
 
 mkdir -p data
 chmod 750 data
