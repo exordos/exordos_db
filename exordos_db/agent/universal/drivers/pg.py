@@ -377,9 +377,11 @@ WHERE d.datname not in """
         spec = pgbackrest.load_spec()
         parameters = config.get("postgresql", {}).get("parameters", {})
 
+        # archive_timeout too: clusters archiving before it was set keep the
+        # old value otherwise
         archiving = parameters.get("archive_command") == pgbackrest.archive_command(
             spec
-        )
+        ) and parameters.get("archive_timeout") == pgbackrest.archive_timeout(spec)
         stanza_missing = (
             spec is not None
             and self.c.pclient.is_primary(get_ttl_hash(seconds=20))

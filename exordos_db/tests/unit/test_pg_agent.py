@@ -351,11 +351,16 @@ def test_replica_leaves_the_repository_and_roles_alone(monkeypatch):
     assert psql.executed == []
 
 
-def _archiving_config(spec):
+def _archiving_config(spec, archive_timeout=None):
+    if archive_timeout is None:
+        archive_timeout = pg.pgbackrest.archive_timeout(spec)
     return {
         "synchronous_node_count": 0,
         "postgresql": {
-            "parameters": {"archive_command": pg.pgbackrest.archive_command(spec)}
+            "parameters": {
+                "archive_command": pg.pgbackrest.archive_command(spec),
+                "archive_timeout": archive_timeout,
+            }
         },
     }
 
@@ -383,6 +388,16 @@ def test_backup_is_unsettled_until_archiving_is_on(monkeypatch):
     instance = _managed_node(FakePsql(), FakePatroni(primary=True), SPEC)
 
     instance._fill_backup(_archiving_config(None))
+
+    assert instance.backup == pg.BACKUP_UNSETTLED
+
+
+def test_backup_is_unsettled_until_archive_timeout_is_set(monkeypatch):
+    # A cluster archiving before archive_timeout was managed has 1800s
+    FakeRepository(monkeypatch, stanza_ready=True, spec=SPEC)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), SPEC)
+
+    instance._fill_backup(_archiving_config(SPEC, archive_timeout="1800s"))
 
     assert instance.backup == pg.BACKUP_UNSETTLED
 
