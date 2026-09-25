@@ -139,6 +139,9 @@ exordos-db-user-api = "exordos_db.cmd.user_api:main"
 exordos-db-gservice = "exordos_db.cmd.gservice:main"
 exordos-db-status-api = "exordos_db.cmd.status_api:main"
 exordos-db-orch-api = "exordos_db.cmd.orch_api:main"
+exordos-db-pg-backup = "exordos_db.cmd.pg_backup:main"
+exordos-db-pg-restore = "exordos_db.cmd.pg_restore:main"
+exordos-db-pg-rollback = "exordos_db.cmd.pg_rollback:main"
 
 [project.entry-points."gcl_sdk_universal_agent"]
 PGCapabilityDriver = "exordos_db.agent.universal.drivers.pg:PGCapabilityDriver"

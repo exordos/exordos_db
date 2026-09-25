@@ -40,11 +40,28 @@ class PGInstanceNode(
     )
     # TODO(akremenetsky): We already have name in the parent model
     name = properties.property(ra_types.String(min_length=1, max_length=64))
-    databases = properties.property(ra_types.Dict())
-    users = properties.property(ra_types.Dict())
+    # None leaves them unmanaged, see PGInstance.roles_imported
+    databases = properties.property(ra_types.AllowNone(ra_types.Dict()))
+    users = properties.property(ra_types.AllowNone(ra_types.Dict()))
     nodes_number = properties.property(ra_types.Integer(min_value=1, max_value=16))
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
+    )
+    # pgBackRest spec, see exordos_db.common.pgbackrest
+    backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # In-place rollback spec, see exordos_db.common.rollback
+    rollback = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Reported by the agent while the roles are unmanaged, not a target field
+    found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Reported by the agent while a rollback or a restore is in progress, not
+    # a target field
+    restore_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
+    # Reported by the primary, see pgbackrest.collect_catalog; not a target
+    # field
+    backup_catalog = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
     )
 
     @classmethod
@@ -57,16 +74,22 @@ class PGInstanceNode(
 
         Refer to the Resource model for more details about target fields.
         """
-        return frozenset(
-            (
-                "uuid",
-                "name",
-                "sync_replica_number",
-                "nodes_number",
-                "databases",
-                "users",
-            )
-        )
+        fields = {
+            "uuid",
+            "name",
+            "sync_replica_number",
+            "nodes_number",
+            "databases",
+            "users",
+        }
+        # Sent only when set: an agent that doesn't know them, on the nodes
+        # of an instance created before them, would never match the target
+        # hash otherwise. The agent takes the target fields from what it's
+        # sent, so a missing one is the same None to a newer agent.
+        for name in ("backup", "rollback"):
+            if getattr(self, name) is not None:
+                fields.add(name)
+        return frozenset(fields)
 
 
 class PGInstance(
@@ -93,6 +116,10 @@ class PGInstance(
                 "uuid",
                 "name",
                 "sync_replica_number",
+                "disk_size",
+                "backup",
+                "roles_imported",
+                "rollback_revision",
             )
         )
 

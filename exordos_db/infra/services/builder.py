@@ -57,7 +57,7 @@ raft:
   partner_addrs: {raft_partner_addrs}
 
 bootstrap:
-  dcs:
+{bootstrap_method}  dcs:
     ttl: 30
     loop_wait: 10
     retry_timeout: 10
@@ -137,6 +137,39 @@ tags:
   clonefrom: false
   nosync: false
 """
+
+# pgBackRest writes the recovery settings, Patroni keeps them for the
+# bootstrap only and drops them afterwards, so replicas don't inherit them
+RESTORE_BOOTSTRAP_METHOD = """\
+  method: pgbackrest
+  pgbackrest:
+    command: /usr/bin/exordos-db-pg-restore
+    keep_existing_recovery_conf: true
+    no_params: true
+"""
+
+
+def bootstraps_from_backup(instance: models.PGInstance) -> bool:
+    # A source set for an in-place rollback isn't a bootstrap source
+    return instance.restore_from is not None and instance.rollback_revision is None
+
+
+def instance_status(instance: models.PGInstance, nodeset_status: str) -> str:
+    if instance.restore_failed():
+        # Until a rollback with a higher revision replaces the failed one, or
+        # a retried restore succeeds
+        return sdk_c.InstanceStatus.ERROR.value
+    # A restore or a rollback isn't over until the roles are matched
+    if not instance.roles_managed():
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+    try:
+        return sdk_c.InstanceStatus(nodeset_status).value
+    except ValueError:
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+
+
+def bootstrap_method(instance: models.PGInstance) -> str:
+    return RESTORE_BOOTSTRAP_METHOD if bootstraps_from_backup(instance) else ""
 
 
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
@@ -268,12 +301,20 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                 raft_partner_addrs=node_raft_members,
                 sync_mode=sync_mode,
                 sync_replica_number=instance.sync_replica_number,
+                bootstrap_method=bootstrap_method(instance),
                 on_change=instance.OnReloadFunc,
             )
             config = instance._create_config(
                 uuid.UUID(node_uuid), self._project_id, content
             )
             new_objects.append(config)
+
+            if bootstraps_from_backup(instance):
+                new_objects.append(
+                    instance._create_restore_config(
+                        uuid.UUID(node_uuid), self._project_id
+                    )
+                )
 
         tgt_nodeset = None
 
@@ -305,10 +346,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                     target.get_resource_kind(),
                 )
 
-        try:
-            instance.status = sdk_c.InstanceStatus(nodeset.status).value
-        except ValueError:
-            instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
+        instance.status = instance_status(instance, nodeset.status)
 
         return (tgt_nodeset, *new_objects)
 

@@ -53,6 +53,16 @@ resources:
       name: "exordos_db.user.delete"
     pg_version_read:
       name: "exordos_db.pg_version.read"
+    backup_repository_create:
+      name: "exordos_db.backup_repository.create"
+    backup_repository_read:
+      name: "exordos_db.backup_repository.read"
+    backup_repository_update:
+      name: "exordos_db.backup_repository.update"
+    backup_repository_delete:
+      name: "exordos_db.backup_repository.delete"
+    backup_read:
+      name: "exordos_db.backup.read"
 
   $core.iam.permissionbinding:
     pg_instance_create_binding:
@@ -106,6 +116,26 @@ resources:
     pg_version_read_binding:
       role: "726f6c65-0000-0000-0000-000000000002"
       permission: $core.iam.permissions.$pg_version_read:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_repository_create_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_repository_create:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_repository_read_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_repository_read:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_repository_update_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_repository_update:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_repository_delete_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_repository_delete:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_read_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_read:uuid
       project_id: $core.iam.projects.$dbaas_project:uuid
 
   $core.iam.users:
