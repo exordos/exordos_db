@@ -150,6 +150,10 @@ class TestConfig:
             "pgbackrest --stanza=1b1bc0de-0000-4000-8000-000000000001 archive-push %p"
         )
 
+    def test_archive_timeout_only_with_archiving(self):
+        assert pgbackrest.archive_timeout(None) == "0"
+        assert pgbackrest.archive_timeout(_spec()) == "300s"
+
     def test_fingerprint_follows_repository_only(self):
         base = pgbackrest.repo_fingerprint(_spec())
 

@@ -333,6 +333,7 @@ WHERE d.datname not in """
             tconfig["postgresql"] = {
                 "parameters": {
                     "archive_command": pgbackrest.archive_command(self.backup),
+                    "archive_timeout": pgbackrest.archive_timeout(self.backup),
                 },
             }
         LOG.info("DCS patch: %s", tconfig)

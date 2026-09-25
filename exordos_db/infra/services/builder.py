@@ -70,7 +70,7 @@ bootstrap:
         # archive_command is set to a no-op to prevent WAL accumulation.
         archive_mode: "on"
         archive_command: ":"
-        archive_timeout: 1800s
+        archive_timeout: 0
         wal_log_hints: 'on'
         wal_compression: 'lz4'
         max_connections: 500

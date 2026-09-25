@@ -61,6 +61,9 @@ PG_DATA_DIR = f"{cc.PATRONI_DIR}/data"
 PG_SOCKET_DIR = "/var/run/postgresql"
 
 DISABLED_ARCHIVE_COMMAND = ":"
+# How old the archived WAL may get, i.e. how much a restore to the latest
+# moment loses. PostgreSQL doesn't switch a segment nothing was written to.
+ARCHIVE_TIMEOUT = "300s"
 
 FIXED_GLOBAL_OPTIONS = {
     "archive-async": "y",
@@ -83,6 +86,11 @@ def archive_command(spec: dict[str, tp.Any] | None) -> str:
     if spec is None:
         return DISABLED_ARCHIVE_COMMAND
     return f"pgbackrest --stanza={spec['stanza']} archive-push %p"
+
+
+def archive_timeout(spec: dict[str, tp.Any] | None) -> str:
+    # Switching segments early is of no use without archiving
+    return "0" if spec is None else ARCHIVE_TIMEOUT
 
 
 def _check_line(key: str, value: str) -> None:

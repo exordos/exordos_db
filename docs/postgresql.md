@@ -177,9 +177,12 @@ can read the instance.
 On the data plane the agent renders `/etc/pgbackrest/pgbackrest.conf` on every
 node, creates the stanza on the primary and sets `archive_command` through the
 Patroni DCS. `exordos-db-pg-backup.timer` runs every 15 minutes on every node
-and takes a backup on the primary when one is due. When the storage is
-unreachable WAL is kept up to a quarter of `disk_size` and dropped after that,
-so the database keeps running at the cost of a gap in point-in-time recovery.
+and takes a backup on the primary when one is due. WAL is archived
+continuously in between: whatever was written is in the storage within about
+five minutes, which is what a restore to the latest moment may lose. When the
+storage is unreachable WAL is kept up to a quarter of `disk_size` and dropped
+after that, so the database keeps running at the cost of a gap in
+point-in-time recovery.
 Archiving is turned on only once the stanza is created; until then users,
 databases and replication settings are applied as usual, and the agent keeps
 retrying.
