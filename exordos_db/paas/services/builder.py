@@ -273,7 +273,9 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             actual_resources.append(
                 models.PGInstanceNode(
                     uuid=PaaSBuilder.agent_uuid_by_node(uuid.UUID(nodes_by_idx[i])),
-                    name=instance.name,
+                    # The agent doesn't need the name, a rename shouldn't
+                    # reach the nodes
+                    name=str(instance.uuid),
                     instance=instance,
                     nodes_number=instance.nodes_number,
                     sync_replica_number=instance.sync_replica_number,
