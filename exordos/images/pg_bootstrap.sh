@@ -59,8 +59,10 @@ if [[ -n "$PERSISTENT_DISK" ]]; then
     # Migrate logs first, some processes may be left writing to root disk until next reboot
     migrate_to_persistent_restart "/var/log" "${PERSISTENT_MOUNT}/var/log" "systemd-journald rsyslog"
     # The package creates it in the image, a /var/log kept from an image
-    # without pgBackRest hides it
-    sudo install -d -m 0770 -o postgres -g postgres /var/log/pgbackrest
+    # without pgBackRest hides it. The files inherit adm, the group rsyslog
+    # reads them as to send them to observability.
+    sudo install -d -m 2750 -o postgres -g adm /var/log/pgbackrest
+    sudo find /var/log/pgbackrest -type f -group postgres -exec chgrp adm {} +
 
     # Migrate Patroni data (raft, pg data)
     migrate_to_persistent "/var/lib/postgresql/patroni/data" "${PERSISTENT_MOUNT}/var/lib/postgresql/patroni/data"

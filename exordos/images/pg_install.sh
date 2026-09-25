@@ -90,7 +90,10 @@ sudo apt-get install postgresql-common -y
 sudo YES=1 /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
 sudo apt-get update
 sudo apt -y install "postgresql-${PG_VERSION}" pgbackrest
-sudo install -d -o postgres -g postgres -m 750 /etc/pgbackrest /var/spool/pgbackrest /var/log/pgbackrest
+sudo install -d -o postgres -g postgres -m 750 /etc/pgbackrest /var/spool/pgbackrest
+# Readable by adm, the group rsyslog reads log files as
+sudo install -d -o postgres -g adm -m 2750 /var/log/pgbackrest
+sudo cp "$GC_PATH/etc/rsyslog.d/48-exordos-pgbackrest.conf" /etc/rsyslog.d/
 sudo systemctl disable --now "postgresql@${PG_VERSION}-main"
 sudo systemctl disable --now postgresql
 sudo ln -s /usr/lib/postgresql/$PG_VERSION/bin/* /usr/sbin/

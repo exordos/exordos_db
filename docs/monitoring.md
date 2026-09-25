@@ -162,6 +162,21 @@ Errors only:
 _HOSTNAME:~"^dbaas-dp-<instance uuid>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
 ```
 
+pgBackRest writes its own files in `/var/log/pgbackrest` (WAL archiving,
+backups, checks); rsyslog on the node reads them and sends their lines to
+VictoriaLogs as syslog with the app name `pgbackrest`. They are kept on the
+node too, rotated weekly. Archiving and backups happen on the primary:
+
+```logsql
+hostname:~"^dbaas-dp-<instance uuid>-node-" app_name:"pgbackrest"
+```
+
+Failed WAL pushes and backups:
+
+```logsql
+hostname:~"^dbaas-dp-<instance uuid>-node-" app_name:"pgbackrest" _msg:~"(ERROR|WARN):"
+```
+
 ## Transactions, locks and maintenance
 
 Age of the oldest open transaction of a client, per state; `idle in
