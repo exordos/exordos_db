@@ -12,6 +12,12 @@ AssertPathIsMountPoint=/var/lib/postgresql/patroni/raft
 Type=simple
 User=postgres
 Group=postgres
+# Patroni gives up the watchdog for good when it can't open it on start, and
+# then never takes the leader lock. softdog is blacklisted by the distribution,
+# modules-load.d skips it and watchdog.service loads it only after
+# multi-user.target: load it here and wait for the udev rule to hand it over
+ExecStartPre=-+/sbin/modprobe softdog
+ExecStartPre=/bin/sh -c 'for i in $$(seq 25); do [ -w /dev/watchdog ] && exit 0; sleep 1; done'
 ExecStart=/var/lib/postgresql/patroni/venv/bin/patroni /var/lib/postgresql/patroni/patroni.yml
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=process
