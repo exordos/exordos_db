@@ -202,9 +202,9 @@ be used, as the primary finds it:
   timer reading the backups or taking one. Wrong credentials, a missing
   bucket or an unreachable storage show up here. It is `null` once an attempt
   succeeds, and is cleared when `backup` changes.
-- `backup_status` is `null` while backups are off or before the primary has
-  reported. The API leaves out fields that are `null`, so a working storage
-  gives `{}`.
+- `backup_status` is `null`, and left out by the API, while backups are off
+  or before the primary has reported. A working storage gives
+  `{"error": null}`.
 
 WAL can go missing from the archive: a primary that goes down before it has
 archived its last segments, WAL dropped while the storage was unreachable.
