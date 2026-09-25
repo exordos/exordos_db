@@ -46,6 +46,22 @@ class PGInstanceNode(
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
     )
+    # pgBackRest spec, see exordos_db.common.pgbackrest
+    backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Until the users and databases of a restored cluster are imported: the
+    # agent leaves them alone and reports them in found_roles, not a target
+    # field
+    adopt_roles = properties.property(ra_types.Boolean(), default=False)
+    found_roles = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Reported by the agent while the restore is in progress, not a target
+    # field
+    restore_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
+    # Reported by the primary while backups are on, not a target field
+    backup_state = properties.property(
+        ra_types.AllowNone(ra_types.Dict()), default=None
+    )
 
     @classmethod
     def get_resource_kind(cls) -> str:
@@ -57,16 +73,21 @@ class PGInstanceNode(
 
         Refer to the Resource model for more details about target fields.
         """
-        return frozenset(
-            (
-                "uuid",
-                "name",
-                "sync_replica_number",
-                "nodes_number",
-                "databases",
-                "users",
-            )
-        )
+        fields = {
+            "uuid",
+            "name",
+            "sync_replica_number",
+            "nodes_number",
+            "databases",
+            "users",
+        }
+        # Only when set: the agent of a node created before them would never
+        # match the target hash, to a newer one missing is the default
+        if self.backup is not None:
+            fields.add("backup")
+        if self.adopt_roles:
+            fields.add("adopt_roles")
+        return frozenset(fields)
 
 
 class PGInstance(
@@ -93,6 +114,9 @@ class PGInstance(
                 "uuid",
                 "name",
                 "sync_replica_number",
+                "disk_size",
+                "backup",
+                "roles_imported",
             )
         )
 

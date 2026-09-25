@@ -57,7 +57,7 @@ raft:
   partner_addrs: {raft_partner_addrs}
 
 bootstrap:
-  dcs:
+{bootstrap_method}  dcs:
     ttl: 30
     loop_wait: 10
     retry_timeout: 10
@@ -70,7 +70,7 @@ bootstrap:
         # archive_command is set to a no-op to prevent WAL accumulation.
         archive_mode: "on"
         archive_command: ":"
-        archive_timeout: 1800s
+        archive_timeout: 0
         wal_log_hints: 'on'
         wal_compression: 'lz4'
         max_connections: 500
@@ -137,6 +137,37 @@ tags:
   clonefrom: false
   nosync: false
 """
+
+# pgBackRest writes the recovery settings, Patroni keeps them for the
+# bootstrap only and drops them afterwards, so replicas don't inherit them
+RESTORE_BOOTSTRAP_METHOD = """\
+  method: pgbackrest
+  pgbackrest:
+    command: /usr/bin/exordos-db-pg-restore
+    keep_existing_recovery_conf: true
+    no_params: true
+"""
+
+
+def instance_status(instance: models.PGInstance, nodeset_status: str) -> str:
+    if instance.restore_failed():
+        return sdk_c.InstanceStatus.ERROR.value
+    # A restore isn't over until the users and databases are imported
+    if instance.restore_from is not None and not instance.roles_imported:
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+    try:
+        return sdk_c.InstanceStatus(nodeset_status).value
+    except ValueError:
+        return sdk_c.InstanceStatus.IN_PROGRESS.value
+
+
+def patroni_scope(instance: models.PGInstance) -> str:
+    """The path of the cluster in the DCS, kept when the instance is renamed."""
+    return str(instance.uuid)
+
+
+def bootstrap_method(instance: models.PGInstance) -> str:
+    return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
 
 
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
@@ -262,18 +293,26 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
         # Just recreate configs, it'll be updated in DB if already exist
         for node_uuid, node in nodeset.nodes.items():
             content = PATRONI_CONF_TEMPLATE.format(
-                cluster_name=instance.name,
+                cluster_name=patroni_scope(instance),
                 node_name=node_uuid,
                 node_ip=node["ipv4"],
                 raft_partner_addrs=node_raft_members,
                 sync_mode=sync_mode,
                 sync_replica_number=instance.sync_replica_number,
+                bootstrap_method=bootstrap_method(instance),
                 on_change=instance.OnReloadFunc,
             )
             config = instance._create_config(
                 uuid.UUID(node_uuid), self._project_id, content
             )
             new_objects.append(config)
+
+            if instance.restore_from is not None:
+                new_objects.append(
+                    instance._create_restore_config(
+                        uuid.UUID(node_uuid), self._project_id
+                    )
+                )
 
         tgt_nodeset = None
 
@@ -305,10 +344,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                     target.get_resource_kind(),
                 )
 
-        try:
-            instance.status = sdk_c.InstanceStatus(nodeset.status).value
-        except ValueError:
-            instance.status = sdk_c.InstanceStatus.IN_PROGRESS.value
+        instance.status = instance_status(instance, nodeset.status)
 
         return (tgt_nodeset, *new_objects)
 
