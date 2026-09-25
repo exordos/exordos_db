@@ -72,13 +72,28 @@ def _backup_node(backup_state):
 
 def test_backup_status_is_what_the_primary_reports():
     instance = types.SimpleNamespace(backup={"kind": "s3"}, backup_status=None)
-    error = {"error": "HTTP request failed with 403 (Forbidden)"}
+    error = "HTTP request failed with 403 (Forbidden)"
 
     status = paas_builder.backup_status(
-        instance, [None, _backup_node(None), _backup_node(error)]
+        instance,
+        [None, _backup_node(None), _backup_node({"error": error, "timeline": 1})],
     )
 
-    assert status == error
+    assert status == {"error": error}
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_backup_status_of_a_former_primary_is_ignored(reverse):
+    # Its agent went down before it could report again after the failover
+    instance = types.SimpleNamespace(backup={"kind": "s3"}, backup_status=None)
+    nodes = [
+        _backup_node({"error": "unreachable", "timeline": 2}),
+        _backup_node({"error": None, "timeline": 3}),
+    ]
+    if reverse:
+        nodes.reverse()
+
+    assert paas_builder.backup_status(instance, nodes) == {"error": None}
 
 
 def test_backup_status_is_kept_while_no_primary_reports():
@@ -91,7 +106,9 @@ def test_backup_status_is_kept_while_no_primary_reports():
 def test_no_backup_status_without_backups():
     instance = types.SimpleNamespace(backup=None, backup_status={"error": "x"})
 
-    assert paas_builder.backup_status(instance, [_backup_node({"error": "x"})]) is None
+    report = _backup_node({"error": "x", "timeline": 1})
+
+    assert paas_builder.backup_status(instance, [report]) is None
 
 
 def _instance(**fields):

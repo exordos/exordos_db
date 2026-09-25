@@ -79,11 +79,18 @@ def backup_status(
     """Take what the primary reports about the backups."""
     if instance.backup is None:
         return None
-    for actual in actuals:
-        if actual is not None and actual.backup_state is not None:
-            return actual.backup_state
-    # No primary reports meanwhile, e.g. during a failover
-    return instance.backup_status
+    reports = [
+        actual.backup_state
+        for actual in actuals
+        if actual is not None and actual.backup_state is not None
+    ]
+    if not reports:
+        # No primary reports meanwhile, e.g. during a failover
+        return instance.backup_status
+    # A former primary whose agent went down keeps its last report; the
+    # current one is on the latest timeline
+    latest = max(reports, key=lambda r: r.get("timeline") or 0)
+    return {"error": latest["error"]}
 
 
 class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):

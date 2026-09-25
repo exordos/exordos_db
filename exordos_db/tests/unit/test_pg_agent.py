@@ -128,6 +128,9 @@ class FakePatroni:
     def config_get(self):
         return {"synchronous_node_count": 0, "postgresql": {"parameters": {}}}
 
+    def get_full_state(self):
+        return {"timeline": 3}
+
     def config_patch(self, config):
         self.patches.append(config)
         return config
@@ -462,12 +465,12 @@ def test_stanza_error_is_reported_by_the_primary(monkeypatch):
 
     instance.dump_to_dp()
 
-    assert instance.backup_state == {"error": "stanza-create failed"}
+    assert instance.backup_state == {"error": "stanza-create failed", "timeline": 3}
 
     repository.reachable = True
     instance.dump_to_dp()
 
-    assert instance.backup_state == {"error": None}
+    assert instance.backup_state == {"error": None, "timeline": 3}
 
 
 def test_replica_reports_no_backup_state(monkeypatch):

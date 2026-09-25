@@ -171,8 +171,10 @@ class PGInstance(meta.MetaDataPlaneModel):
     restore_state = properties.property(
         ra_types.AllowNone(ra_types.Dict()), default=None
     )
-    # {"error": ...} of the repository as the primary uses it, None on a
-    # replica or without backups. Not a target field, like found_roles.
+    # {"error": ..., "timeline": ...} of the repository as the primary uses
+    # it, None on a replica or without backups. The timeline tells the
+    # control plane the current primary from a former one that went down
+    # before it could report again. Not a target field, like found_roles.
     backup_state = properties.property(
         ra_types.AllowNone(ra_types.Dict()), default=None
     )
@@ -410,12 +412,14 @@ WHERE d.datname not in """
     def _backup_state(self) -> dict[str, tp.Any] | None:
         if pgbackrest.load_spec() is None:
             return None
+        pclient = self.c.pclient
         try:
-            if not self.c.pclient.is_primary(get_ttl_hash(seconds=20)):
+            if not pclient.is_primary(get_ttl_hash(seconds=20)):
                 return None
+            timeline = pclient.get_full_state().get("timeline")
         except requests.RequestException:
             return None
-        return {"error": pgbackrest.load_backup_error()}
+        return {"error": pgbackrest.load_backup_error(), "timeline": timeline}
 
     def _apply(self) -> None:
         primary = self.c.pclient.is_primary(get_ttl_hash(seconds=20))
