@@ -45,7 +45,7 @@ build:
       - name: exordos-db
         format: zst
         profile: exordos_base
-        profile_version: "1.3.2"
+        profile_version: "1.3.4"
         script: images/cp_install.sh
 
         # Override image build parameters, for instance disk size
@@ -56,7 +56,7 @@ build:
       - name: exordos-db-pg
         format: zst
         profile: exordos_base
-        profile_version: "1.3.2"
+        profile_version: "1.3.4"
         script: images/pg_install.sh
 
         # Override image build parameters, for instance disk size
