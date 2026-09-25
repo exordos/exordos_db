@@ -197,3 +197,10 @@ def test_api_asks_for_a_password(call, kwargs):
     # Only users imported from a restored cluster have none
     with pytest.raises(controllers.PasswordRequiredError):
         getattr(controllers.PGUserController, call)(None, **kwargs)
+
+
+def test_a_renamed_cluster_keeps_its_scope():
+    instance = _instance()
+    scope = infra_builder.patroni_scope(instance)
+    instance.name = "renamed"
+    assert infra_builder.patroni_scope(instance) == scope == str(instance.uuid)
