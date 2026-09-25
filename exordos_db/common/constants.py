@@ -22,3 +22,17 @@ PATRONI_DIR = "/var/lib/postgresql/patroni"
 PATRONI_CONFIG_FILE = f"{PATRONI_DIR}/patroni.yml"
 PATRONI_API_PORT = 8008
 PATRONI_API_ENDPOINT = f"http://127.0.0.1:{PATRONI_API_PORT}"
+
+# vmagent of the base image renders its scrape config from this template at
+# every start, with the node host name in place of __HOSTNAME__, and relays
+# the metrics to the platform VictoriaMetrics. It only runs once the
+# observability element is deployed.
+VMAGENT_SCRAPE_TEMPLATE = "/etc/exordos_observability/vmagent_scrape.yml.tpl"
+NODE_EXPORTER_ENDPOINT = "127.0.0.1:9100"
+POSTGRES_EXPORTER_ENDPOINT = "127.0.0.1:9187"
+# A second postgres_exporter probes every database of the instance for the
+# per-table statistics, which PostgreSQL only shows to a session of the same
+# database. The agent keeps the list of databases in a file_sd file of
+# vmagent, which rereads it every minute.
+POSTGRES_DB_EXPORTER_ENDPOINT = "127.0.0.1:9188"
+VMAGENT_DATABASES_SD_FILE = f"{WORK_DIR}/vmagent_databases.json"

@@ -74,6 +74,7 @@ markdown_extensions:
 
 nav:
   - PostgreSQL: postgresql.md
+  - Monitoring: monitoring.md
   - OpenAPI:
       - User: openapi/openapi_user.md
       - Orch: openapi/openapi_orch.md

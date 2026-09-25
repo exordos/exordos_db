@@ -90,10 +90,20 @@ sudo apt-get install postgresql-common -y
 sudo YES=1 /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
 sudo apt-get update
 sudo apt -y install "postgresql-${PG_VERSION}" pgbackrest
-sudo install -d -o postgres -g postgres -m 750 /etc/pgbackrest /var/spool/pgbackrest /var/log/pgbackrest
+sudo install -d -o postgres -g postgres -m 750 /etc/pgbackrest /var/spool/pgbackrest
+# Readable by adm, the group rsyslog reads log files as
+sudo install -d -o postgres -g adm -m 2750 /var/log/pgbackrest
+sudo cp "$GC_PATH/etc/rsyslog.d/48-exordos-pgbackrest.conf" /etc/rsyslog.d/
 sudo systemctl disable --now "postgresql@${PG_VERSION}-main"
 sudo systemctl disable --now postgresql
 sudo ln -s /usr/lib/postgresql/$PG_VERSION/bin/* /usr/sbin/
+
+# PostgreSQL metrics for the vmagent of the base image, run by our own unit
+sudo apt -y install prometheus-postgres-exporter
+sudo systemctl disable --now prometheus-postgres-exporter
+sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter.service" $SYSTEMD_SERVICE_DIR
+sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter-databases.service" $SYSTEMD_SERVICE_DIR
+sudo systemctl enable exordos-postgres-exporter exordos-postgres-exporter-databases
 
 # Setup watchdog
 cat <<EOF | sudo tee /etc/udev/rules.d/99-watchdog.rules

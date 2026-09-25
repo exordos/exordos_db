@@ -74,4 +74,8 @@ build:
       #   override:
       #     disk_size: "6G"
       #     use_backing_file: true
+    # Grafana dashboard of PostgreSQL instances on the shared observability
+    # Grafana instance. Depends on the `observability` element and reuses the
+    # grafanaaas plugin, so it needs no image or wheel of its own.
+    - manifest: manifests/dbaas_dashboard.yaml.j2
     - manifest: manifests/communal_pg_cluster.yaml.j2
