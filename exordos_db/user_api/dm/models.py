@@ -27,6 +27,7 @@ from restalchemy.storage.sql import orm
 
 from exordos_db.common import utils as u
 from exordos_db.common.pg_auth import passwd
+from exordos_db.user_api.dm import backups
 
 
 class PGStatus(str, enum.Enum):
@@ -89,6 +90,25 @@ class PGInstance(
     )
     # TODO: support version update
     version = relationships.relationship(PGVersion, required=True, read_only=True)
+    # Continuous WAL archiving and periodic backups, disabled when None
+    backup = properties.property(backups.BACKUP_TYPE, default=None)
+    # Bootstrap the cluster from a backup instead of an empty database
+    restore_from = properties.property(
+        backups.RESTORE_SOURCE_TYPE, default=None, read_only=True
+    )
+    # Users and databases of a restored cluster exist on the data plane
+    # before the control plane knows them. They aren't managed (so aren't
+    # dropped) until they are imported.
+    roles_imported = properties.property(types.Boolean(), default=False)
+    # {"phase": ..., "error": ...} of the restore of a new instance as its
+    # nodes report it, None when there is none in progress
+    restore_status = properties.property(types.AllowNone(types.Dict()), default=None)
+    # {"error": ...} of the backups as the primary reports it, None while
+    # backups are off or before the primary has reported
+    backup_status = properties.property(types.AllowNone(types.Dict()), default=None)
+
+    def restore_failed(self) -> bool:
+        return self.restore_status is not None and bool(self.restore_status["error"])
 
     def get_users(self, session=None):
         return PGUser.objects.get_all(
@@ -153,11 +173,18 @@ class PGUser(InstanceChildModel):
         types.Enum([status.value for status in PGStatus]),
         default=PGStatus.ACTIVE.value,
     )
-    password = properties.property(types.String(min_length=8, max_length=99))
+    # None for users imported from a restored cluster until it's set
+    password = properties.property(
+        types.AllowNone(types.String(min_length=8, max_length=99)),
+        default=None,
+    )
     password_hash = properties.property(types.String(min_length=1, max_length=512))
 
     def _update_pw_hash(self):
-        self.password_hash = passwd.scram_sha_256(self.password)
+        if self.password is not None:
+            self.password_hash = passwd.scram_sha_256(self.password)
+        elif self.password_hash is None:
+            raise ValueError("password is required")
 
     def insert(self, session=None):
         self._update_pw_hash()

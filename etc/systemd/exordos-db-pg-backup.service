@@ -1,0 +1,10 @@
+[Unit]
+Description=Exordos Database PG backup
+After=exordos-patroni.service
+ConditionPathExists=/etc/pgbackrest/exordos_backup.json
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/exordos-db-pg-backup
