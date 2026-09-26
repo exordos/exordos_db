@@ -1,0 +1,87 @@
+# A new PostgreSQL instance started from the backups of example_pg_backup.
+# restore_from is taken on creation only: to restore again, delete this
+# element and install it anew. See docs/postgresql.md.
+name: "example_pg_restore"
+description: "Exordos example of a PostgreSQL instance restored from backups"
+schema_version: 1
+version: "1.0.0"
+api_version: "v1"
+
+requirements:
+  core:
+    from_version: "0.0.0"
+  dbaas:
+    from_version: "2.5.0"
+  communal_s3:
+    from_version: "0.0.0"
+  example_pg_backup:
+    from_version: "1.0.0"
+
+resources:
+
+  $dbaas.types.postgres.instances:
+    example_pg_restored:
+      name: "example-pg-restored"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      nodes_number: 1
+      cpu: $example_pg_restore.imports.$var_default_cores:value
+      ram: $example_pg_restore.imports.$var_default_ram:value
+      # The same major version and room for the data of the source
+      disk_size: 20
+      version: $example_pg_restore.imports.$pg18:uuid
+      restore_from:
+        kind: s3
+        endpoint: f"http://{$example_pg_restore.imports.$communal_s3:join(ipsv4)}:9000"
+        bucket: $example_pg_restore.imports.$bucket:name
+        access_key: $example_pg_restore.imports.$access_key:value
+        secret_key: $example_pg_restore.imports.$secret_key:value
+        encryption_key: $example_pg_restore.imports.$encryption_key:value
+        # The backups of an instance are found by its uuid, the instance
+        # itself may be gone
+        stanza: $example_pg_restore.imports.$source:uuid
+        # The end of the archive; a moment instead:
+        #   target: {kind: time, time: "2026-09-26T10:30:00Z"}
+        target:
+          kind: latest
+
+imports:
+  communal_s3:
+    element: "$communal_s3"
+    kind: "resource"
+    link: "$s3aas.types.s3.instances.$communal_s3"
+  source:
+    element: "$example_pg_backup"
+    kind: "resource"
+    link: "$dbaas.types.postgres.instances.$example_pg"
+  bucket:
+    element: "$example_pg_backup"
+    kind: "resource"
+    link: "$s3aas.types.s3.instances.$communal_s3.buckets.$pg_backups"
+  access_key:
+    element: "$example_pg_backup"
+    kind: "resource"
+    link: "$core.secret.passwords.$pg_backup_access_key"
+  secret_key:
+    element: "$example_pg_backup"
+    kind: "resource"
+    link: "$core.secret.passwords.$pg_backup_secret_key"
+  encryption_key:
+    element: "$example_pg_backup"
+    kind: "resource"
+    link: "$core.secret.passwords.$pg_backup_encryption_key"
+  pg18:
+    element: "$dbaas"
+    kind: "resource"
+    link: "$dbaas.types.postgres.versions.$pg18"
+  var_default_cores:
+    element: "$core"
+    kind: "resource"
+    link: "$core.vs.variables.$default_cores"
+  var_default_ram:
+    element: "$core"
+    kind: "resource"
+    link: "$core.vs.variables.$default_ram"
+
+exports:
+  instance:
+    link: "$dbaas.types.postgres.instances.$example_pg_restored"
