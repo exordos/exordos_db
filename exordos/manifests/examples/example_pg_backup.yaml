@@ -1,0 +1,167 @@
+# A PostgreSQL instance backed up to a bucket of the communal S3 instance.
+# The element owns the bucket, a user allowed only into it with an access
+# key, and the key of the repository encryption. See docs/postgresql.md.
+name: "example_pg_backup"
+description: "Exordos example of a PostgreSQL instance with backups to S3"
+schema_version: 1
+version: "1.0.0"
+api_version: "v1"
+
+requirements:
+  core:
+    from_version: "0.0.0"
+  dbaas:
+    from_version: "2.5.0"
+  s3aas:
+    from_version: "0.0.0"
+  communal_s3:
+    from_version: "0.0.0"
+
+resources:
+
+  $core.secret.passwords:
+    pg_backup_access_key:
+      name: pg_backup_access_key
+      description: "Access key of the backups of example_pg"
+      default_length: 20
+      constructor:
+        kind: plain
+      method: AUTO_HEX
+    pg_backup_secret_key:
+      name: pg_backup_secret_key
+      description: "Secret key of the backups of example_pg"
+      default_length: 40
+      constructor:
+        kind: plain
+      method: AUTO_HEX
+    # The backups can't be restored without it
+    pg_backup_encryption_key:
+      name: pg_backup_encryption_key
+      description: "Encryption key of the backups of example_pg"
+      default_length: 64
+      constructor:
+        kind: plain
+      method: AUTO_HEX
+    pg_app_password:
+      name: pg_app_password
+      description: "Password of the app user of example_pg"
+      default_length: 32
+      constructor:
+        kind: plain
+      method: AUTO_HEX
+
+  $example_pg_backup.imports.$communal_s3.buckets:
+    pg_backups:
+      name: "example-pg-backups"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      instance: $example_pg_backup.imports.$communal_s3:uuid
+      versioning_enabled: false
+      quota_bytes: 0
+      object_lock_enabled: false
+      public: false
+
+  $example_pg_backup.imports.$communal_s3.policies:
+    pg_backups_policy:
+      name: "example-pg-backups"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      instance: $example_pg_backup.imports.$communal_s3:uuid
+      content:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:ListBucket"
+            Resource:
+              - f"arn:aws:s3:::{$s3aas.types.s3.instances.$communal_s3.buckets.$pg_backups:name}"
+              - f"arn:aws:s3:::{$s3aas.types.s3.instances.$communal_s3.buckets.$pg_backups:name}/*"
+
+  $example_pg_backup.imports.$communal_s3.users:
+    pg_backups_user:
+      name: "example-pg-backups"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      instance: $example_pg_backup.imports.$communal_s3:uuid
+
+  $s3aas.types.s3.instances.$communal_s3.users.$pg_backups_user.policies:
+    pg_backups_policy_attachment:
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      policy: $s3aas.types.s3.instances.$communal_s3.policies.$pg_backups_policy:uuid
+      user: $s3aas.types.s3.instances.$communal_s3.users.$pg_backups_user:uuid
+      instance: $example_pg_backup.imports.$communal_s3:uuid
+
+  $s3aas.types.s3.instances.$communal_s3.users.$pg_backups_user.access_keys:
+    pg_backups_access_key:
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      access_key: $core.secret.passwords.$pg_backup_access_key:value
+      secret_key: $core.secret.passwords.$pg_backup_secret_key:value
+      user: $s3aas.types.s3.instances.$communal_s3.users.$pg_backups_user:uuid
+      instance: $example_pg_backup.imports.$communal_s3:uuid
+
+  $dbaas.types.postgres.instances:
+    example_pg:
+      name: "example-pg"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      nodes_number: 1
+      cpu: $example_pg_backup.imports.$var_default_cores:value
+      ram: $example_pg_backup.imports.$var_default_ram:value
+      disk_size: 20
+      version: $example_pg_backup.imports.$pg18:uuid
+      backup:
+        kind: s3
+        endpoint: f"http://{$example_pg_backup.imports.$communal_s3:join(ipsv4)}:9000"
+        bucket: $s3aas.types.s3.instances.$communal_s3.buckets.$pg_backups:name
+        access_key: $core.secret.passwords.$pg_backup_access_key:value
+        secret_key: $core.secret.passwords.$pg_backup_secret_key:value
+        encryption_key: $core.secret.passwords.$pg_backup_encryption_key:value
+        # A full backup a week, an incremental one a day, two weeks kept
+        full_interval_hours: 168
+        incr_interval_hours: 24
+        retention_full: 2
+
+  $dbaas.types.postgres.instances.$example_pg.users:
+    app:
+      name: "app"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      password: $core.secret.passwords.$pg_app_password:value
+      instance: $dbaas.types.postgres.instances.$example_pg:uuid
+
+  $dbaas.types.postgres.instances.$example_pg.databases:
+    app:
+      name: "app"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      owner: $dbaas.types.postgres.instances.$example_pg.users.$app:uuid
+      instance: $dbaas.types.postgres.instances.$example_pg:uuid
+
+imports:
+  communal_s3:
+    element: "$communal_s3"
+    kind: "resource"
+    link: "$s3aas.types.s3.instances.$communal_s3"
+  pg18:
+    element: "$dbaas"
+    kind: "resource"
+    link: "$dbaas.types.postgres.versions.$pg18"
+  var_default_cores:
+    element: "$core"
+    kind: "resource"
+    link: "$core.vs.variables.$default_cores"
+  var_default_ram:
+    element: "$core"
+    kind: "resource"
+    link: "$core.vs.variables.$default_ram"
+
+# A restore needs the storage, the key and the uuid of the instance, the
+# stanza of its backups: see example_pg_restore.yaml
+exports:
+  instance:
+    link: "$dbaas.types.postgres.instances.$example_pg"
+  bucket:
+    link: "$s3aas.types.s3.instances.$communal_s3.buckets.$pg_backups"
+  access_key:
+    link: "$core.secret.passwords.$pg_backup_access_key"
+  secret_key:
+    link: "$core.secret.passwords.$pg_backup_secret_key"
+  encryption_key:
+    link: "$core.secret.passwords.$pg_backup_encryption_key"

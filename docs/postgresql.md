@@ -131,6 +131,9 @@ Setting `backup` on an instance enables continuous WAL archiving and periodic
 backups with [pgBackRest](https://pgbackrest.org/). The storage is described
 in full by the user: DBaaS neither creates buckets nor manages credentials, so
 the S3 lifecycle belongs to manifests and other elements.
+In the repository, `exordos/manifests/examples/example_pg_backup.yaml` backs
+an instance up to a bucket of the communal S3 instance and
+`example_pg_restore.yaml` next to it starts a new one from its backups.
 
 Updating the DBaaS element doesn't reinstall the nodes of existing instances
 at once. They keep the agent they were created with, which doesn't know
