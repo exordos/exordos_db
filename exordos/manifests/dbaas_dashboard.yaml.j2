@@ -855,6 +855,327 @@ resources:
                     mode: fixed
                     fixedColor: red
             description: WAL segments pgBackRest archived, with backups enabled. Failed segments stay in pg_wal until archived.
+          - id: 56
+            type: row
+            title: Backups
+            collapsed: false
+            gridPos:
+              h: 1
+              w: 24
+              x: 0
+              y: 79
+            panels: []
+          - id: 57
+            type: stat
+            title: Last backup
+            gridPos:
+              h: 4
+              w: 4
+              x: 0
+              y: 80
+            targets:
+            - refId: A
+              expr: time() - max(exordos_db_backup_last_completion_timestamp_seconds{exordos_db_instance="$db",backup_type="incr"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: s
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: green
+                    value: null
+                  - color: orange
+                    value: 90000
+                  - color: red
+                    value: 176400
+              overrides: []
+            options: *id001
+            description: Time since the last backup of any type finished. The incremental ones are due every 24 h by default; the timer runs every 15 min. No data means backups are off, or a node image that predates the backup metrics.
+          - id: 58
+            type: stat
+            title: Last full backup
+            gridPos:
+              h: 4
+              w: 4
+              x: 4
+              y: 80
+            targets:
+            - refId: A
+              expr: time() - max(exordos_db_backup_last_completion_timestamp_seconds{exordos_db_instance="$db",backup_type="full"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: s
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: green
+                    value: null
+                  - color: orange
+                    value: 612000
+                  - color: red
+                    value: 777600
+              overrides: []
+            options: *id001
+            description: Time since the last full backup finished, due every 168 h by default.
+          - id: 59
+            type: stat
+            title: Recovery window
+            gridPos:
+              h: 4
+              w: 4
+              x: 8
+              y: 80
+            targets:
+            - refId: A
+              expr: max(time() - pg_stat_archiver_last_archive_age{exordos_db_instance="$db"} - on (instance) group_left exordos_db_backup_recovery_window_start_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: s
+              overrides: []
+            options:
+              colorMode: none
+              graphMode: none
+            description: How far back a restore can go, from the end of the oldest backup to the last WAL archived.
+          - id: 60
+            type: stat
+            title: Restorable from
+            gridPos:
+              h: 4
+              w: 4
+              x: 12
+              y: 80
+            targets:
+            - refId: A
+              expr: max(exordos_db_backup_recovery_window_start_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1)) * 1000
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                unit: dateTimeAsIso
+              overrides: []
+            options:
+              colorMode: none
+              graphMode: none
+            description: The earliest moment a restore can reach, the end of the oldest backup in the repository.
+          - id: 61
+            type: stat
+            title: Missing WAL
+            gridPos:
+              h: 4
+              w: 4
+              x: 16
+              y: 80
+            targets:
+            - refId: A
+              expr: max(exordos_db_backup_archive_missing_segments{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                thresholds:
+                  mode: absolute
+                  steps:
+                  - color: green
+                    value: null
+                  - color: red
+                    value: 1
+              overrides: []
+            options: *id001
+            description: WAL segments missing from the archive since the last backup, lost to a failover or while the storage was unreachable. A restore stops before them; the timer takes a backup past them on its next run.
+          - id: 62
+            type: stat
+            title: Backup timer
+            gridPos:
+              h: 4
+              w: 4
+              x: 20
+              y: 80
+            targets:
+            - refId: A
+              expr: max(exordos_db_backup_run_success{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+            fieldConfig:
+              defaults:
+                mappings:
+                - type: value
+                  options:
+                    '0':
+                      text: failed
+                      color: red
+                    '1':
+                      text: ok
+                      color: green
+              overrides: []
+            options: *id001
+            description: Whether the last run of the backup timer on the primary read the repository and took the backup due. The cause of a failure is in backup_status of the API and in the pgBackRest logs below.
+          - id: 63
+            type: state-timeline
+            title: Recovery window
+            gridPos:
+              h: 5
+              w: 24
+              x: 0
+              y: 84
+            timeFrom: 30d
+            targets:
+            - refId: A
+              expr: (time() >= bool scalar(max(exordos_db_backup_recovery_window_start_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1)) @ end())) + (time() > bool scalar(max(time() - pg_stat_archiver_last_archive_age{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1)) @ end()))
+              legendFormat: Restorable
+            - refId: B
+              expr: max((max by (backup_name) (exordos_db_backup_stop_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1)) @ end()) <= time()) * 1000
+              legendFormat: Restored from
+            fieldConfig:
+              defaults:
+                custom:
+                  fillOpacity: 70
+                  lineWidth: 1
+              overrides:
+              - matcher:
+                  id: byName
+                  options: Restorable
+                properties:
+                - id: mappings
+                  value:
+                  - type: value
+                    options:
+                      '0':
+                        text: before the oldest backup
+                        color: transparent
+                      '1':
+                        text: restorable
+                        color: green
+                      '2':
+                        text: not archived yet
+                        color: orange
+              - matcher:
+                  id: byName
+                  options: Restored from
+                properties:
+                - id: unit
+                  value: time:MM-DD HH:mm
+                - id: color
+                  value:
+                    mode: continuous-BlPu
+            options:
+              showValue: auto
+              mergeValues: true
+              alignValue: left
+              legend:
+                showLegend: false
+            description: The last 30 days as the repository holds them now. Restorable is where a restore to a point in time can land; Restored from is the backup such a restore starts from, the last one finished by then, the WAL archived since is replayed on top.
+          - id: 64
+            type: table
+            title: Backups
+            gridPos:
+              h: 8
+              w: 24
+              x: 0
+              y: 89
+            targets:
+            - refId: start
+              expr: max by (backup_name, backup_type) (exordos_db_backup_start_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1)) * 1000
+              legendFormat: ''
+              instant: true
+              range: false
+              format: table
+            - refId: stop
+              expr: max by (backup_name, backup_type) (exordos_db_backup_stop_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1)) * 1000
+              legendFormat: ''
+              instant: true
+              range: false
+              format: table
+            - refId: took
+              expr: max by (backup_name, backup_type) (exordos_db_backup_stop_timestamp_seconds{exordos_db_instance="$db"} - exordos_db_backup_start_timestamp_seconds{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+              instant: true
+              range: false
+              format: table
+            - refId: size
+              expr: max by (backup_name, backup_type) (exordos_db_backup_size_bytes{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+              instant: true
+              range: false
+              format: table
+            - refId: stored
+              expr: max by (backup_name, backup_type) (exordos_db_backup_repo_delta_bytes{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+              instant: true
+              range: false
+              format: table
+            - refId: error
+              expr: max by (backup_name, backup_type) (exordos_db_backup_error{exordos_db_instance="$db"} and on (instance) (patroni_primary{exordos_db_instance="$db"} == 1))
+              legendFormat: ''
+              instant: true
+              range: false
+              format: table
+            fieldConfig:
+              defaults: {}
+              overrides:
+              - matcher:
+                  id: byRegexp
+                  options: Started|Finished
+                properties:
+                - id: unit
+                  value: dateTimeAsIso
+              - matcher:
+                  id: byName
+                  options: Took
+                properties:
+                - id: unit
+                  value: s
+              - matcher:
+                  id: byRegexp
+                  options: Database size|Stored
+                properties:
+                - id: unit
+                  value: bytes
+              - matcher:
+                  id: byName
+                  options: Checksum errors
+                properties:
+                - id: mappings
+                  value:
+                  - type: value
+                    options:
+                      '0':
+                        text: 'no'
+                      '1':
+                        text: 'yes'
+                        color: red
+                - id: custom.cellOptions
+                  value:
+                    type: color-text
+            options:
+              showHeader: true
+              cellHeight: sm
+              footer:
+                show: false
+            transformations:
+            - id: merge
+              options: {}
+            - id: organize
+              options:
+                excludeByName:
+                  Time: true
+                indexByName:
+                  backup_name: 0
+                  backup_type: 1
+                renameByName:
+                  backup_name: Backup
+                  backup_type: Type
+                  'Value #start': Started
+                  'Value #stop': Finished
+                  'Value #took': Took
+                  'Value #size': Database size
+                  'Value #stored': Stored
+                  'Value #error': Checksum errors
+            - id: sortBy
+              options:
+                sort:
+                - field: Finished
+                  desc: true
+            description: The backups in the repository, as the primary last read them. Database size is what a restore brings back; Stored is what the backup added to the repository, compressed, an incremental one only the pages changed since the backup before. A backup with checksum errors restores all the same, the pages were broken in the database already.
           - id: 38
             type: row
             title: Disk
@@ -863,7 +1184,7 @@ resources:
               h: 1
               w: 24
               x: 0
-              y: 79
+              y: 97
             panels: []
           - id: 39
             type: timeseries
@@ -872,7 +1193,7 @@ resources:
               h: 8
               w: 8
               x: 0
-              y: 80
+              y: 98
             targets:
             - refId: A
               expr: 100 * (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"}) / (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"} + node_filesystem_avail_bytes{mountpoint="/var/lib/postgresql/patroni/data",instance=~"dbaas-dp-$db-node-.+"})
@@ -891,7 +1212,7 @@ resources:
               h: 8
               w: 8
               x: 8
-              y: 80
+              y: 98
             targets:
             - refId: A
               expr: max by (datname) (pg_database_size_bytes{exordos_db_instance="$db",datname!~"template[01]"})
@@ -907,7 +1228,7 @@ resources:
               h: 8
               w: 8
               x: 16
-              y: 80
+              y: 98
             targets:
             - refId: A
               expr: max by (instance) (pg_wal_size_bytes{exordos_db_instance="$db"})
@@ -924,7 +1245,7 @@ resources:
               h: 8
               w: 8
               x: 0
-              y: 88
+              y: 106
             targets:
             - refId: A
               expr: sum by (instance, device) (rate(node_disk_read_bytes_total{instance=~"dbaas-dp-$db-node-.+",device!~"loop.*|sr.*"}[5m]))
@@ -944,7 +1265,7 @@ resources:
               h: 8
               w: 8
               x: 8
-              y: 88
+              y: 106
             targets:
             - refId: A
               expr: sum by (instance, device) (rate(node_disk_read_time_seconds_total{instance=~"dbaas-dp-$db-node-.+",device!~"loop.*|sr.*"}[5m])) / sum by (instance, device) (rate(node_disk_reads_completed_total{instance=~"dbaas-dp-$db-node-.+",device!~"loop.*|sr.*"}[5m]))
@@ -964,7 +1285,7 @@ resources:
               h: 8
               w: 8
               x: 16
-              y: 88
+              y: 106
             targets:
             - refId: A
               expr: rate(node_disk_io_time_seconds_total{instance=~"dbaas-dp-$db-node-.+",device!~"loop.*|sr.*"}[5m])
@@ -984,7 +1305,7 @@ resources:
               h: 1
               w: 24
               x: 0
-              y: 96
+              y: 114
             panels: []
           - id: 46
             type: timeseries
@@ -993,7 +1314,7 @@ resources:
               h: 8
               w: 8
               x: 0
-              y: 97
+              y: 115
             targets:
             - refId: A
               expr: 1 - avg by (instance) (rate(node_cpu_seconds_total{instance=~"dbaas-dp-$db-node-.+",mode="idle"}[5m]))
@@ -1011,7 +1332,7 @@ resources:
               h: 8
               w: 8
               x: 8
-              y: 97
+              y: 115
             targets:
             - refId: A
               expr: avg by (mode) (rate(node_cpu_seconds_total{instance=~"dbaas-dp-$db-node-.+",mode!="idle"}[5m]))
@@ -1030,7 +1351,7 @@ resources:
               h: 8
               w: 8
               x: 16
-              y: 97
+              y: 115
             targets:
             - refId: A
               expr: 1 - node_memory_MemAvailable_bytes{instance=~"dbaas-dp-$db-node-.+"} / node_memory_MemTotal_bytes{instance=~"dbaas-dp-$db-node-.+"}
@@ -1049,7 +1370,7 @@ resources:
               h: 8
               w: 8
               x: 0
-              y: 105
+              y: 123
             targets:
             - refId: A
               expr: node_load5{instance=~"dbaas-dp-$db-node-.+"} / on (instance) count by (instance) (node_cpu_seconds_total{instance=~"dbaas-dp-$db-node-.+",mode="idle"})
@@ -1065,7 +1386,7 @@ resources:
               h: 8
               w: 8
               x: 8
-              y: 105
+              y: 123
             targets:
             - refId: A
               expr: sum by (instance) (rate(node_network_receive_bytes_total{instance=~"dbaas-dp-$db-node-.+",device!="lo"}[5m]))
@@ -1085,7 +1406,7 @@ resources:
               h: 8
               w: 8
               x: 16
-              y: 105
+              y: 123
             targets:
             - refId: A
               expr: max(pg_settings_server_version_num{exordos_db_instance="$db"})
@@ -1131,7 +1452,7 @@ resources:
               h: 1
               w: 24
               x: 0
-              y: 113
+              y: 131
             panels: []
           - id: 53
             type: timeseries
@@ -1143,7 +1464,7 @@ resources:
               h: 7
               w: 12
               x: 0
-              y: 114
+              y: 132
             targets:
             - refId: A
               expr: _HOSTNAME:~"^dbaas-dp-$db-node-" _SYSTEMD_UNIT:"exordos-patroni.service" | stats by (_HOSTNAME) count() lines
@@ -1162,7 +1483,7 @@ resources:
               h: 7
               w: 12
               x: 12
-              y: 114
+              y: 132
             targets:
             - refId: A
               expr: _HOSTNAME:~"^dbaas-dp-$db-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):" | stats by (_HOSTNAME) count() errors
@@ -1181,7 +1502,7 @@ resources:
               h: 14
               w: 24
               x: 0
-              y: 121
+              y: 139
             targets:
             - refId: A
               expr: _HOSTNAME:~"^dbaas-dp-$db-node-" _SYSTEMD_UNIT:"exordos-patroni.service"

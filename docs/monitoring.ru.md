@@ -149,6 +149,56 @@ max by (exordos_db_instance, datname) (pg_database_size_bytes{datname!~"template
 max by (exordos_db_instance, instance) (pg_wal_size_bytes)
 ```
 
+## Бэкапы
+
+При включённых бэкапах таймер бэкапа (`exordos-db-pg-backup`, раз в 15 мин)
+читает `pgbackrest info` на праймари и пишет найденное в
+`/var/lib/exordos/node_exporter/exordos_db_backup.prom`, который отдаёт
+node_exporter базового образа (его textfile collector, `exordos_base` 1.3.5 или
+новее). Реплика и нода инстанса с выключенными бэкапами файл удаляют.
+Серии приходят через job `node_exporter` с метками выше; бывший праймари держит
+свой файл до следующего запуска, поэтому запросы берут только текущий праймари.
+
+| Метрика | Метки | Смысл |
+|---|---|---|
+| `exordos_db_backup_start_timestamp_seconds`, `exordos_db_backup_stop_timestamp_seconds` | `backup_name`, `backup_type` | когда бэкап в репозитории начался и закончился |
+| `exordos_db_backup_size_bytes` | `backup_name`, `backup_type` | размер базы в бэкапе |
+| `exordos_db_backup_repo_delta_bytes` | `backup_name`, `backup_type` | сколько бэкап добавил в репозиторий, сжатым |
+| `exordos_db_backup_error` | `backup_name`, `backup_type` | 1, если в бэкапе есть страницы с ошибками контрольных сумм; восстанавливается он всё равно |
+| `exordos_db_backup_last_completion_timestamp_seconds` | `backup_type` | когда закончился последний бэкап этого типа; полный считается и `diff`, и `incr`, `diff` — ещё и `incr` |
+| `exordos_db_backup_recovery_window_start_timestamp_seconds` | | самый ранний момент, до которого можно восстановиться, — конец самого старого бэкапа |
+| `exordos_db_backup_archive_missing_segments` | | сегменты WAL, которых нет в архиве после последнего бэкапа; восстановиться дальше них можно только из более позднего бэкапа, его таймер и снимает |
+| `exordos_db_backup_run_timestamp_seconds`, `exordos_db_backup_run_success` | | последний запуск таймера и удалось ли ему прочитать репозиторий и снять положенный бэкап |
+
+Восстановиться можно от начала окна до последнего заархивированного WAL, то
+есть на `pg_stat_archiver_last_archive_age` назад. PostgreSQL переключает
+сегмент по `archive_timeout` (300 с), только если в него что-то писали, поэтому
+на простаивающем инстансе возраст растёт, а ничего не теряется.
+
+Время с последнего бэкапа любого типа, по текущему праймари:
+
+```promql
+time() - max by (exordos_db_instance) (
+  exordos_db_backup_last_completion_timestamp_seconds{backup_type="incr"}
+  and on (instance) (patroni_primary == 1)
+)
+```
+
+Окно восстановления, в секундах:
+
+```promql
+max by (exordos_db_instance) (
+  time() - pg_stat_archiver_last_archive_age
+  - on (instance) group_left exordos_db_backup_recovery_window_start_timestamp_seconds
+  and on (instance) (patroni_primary == 1)
+)
+```
+
+Стоит алертить: нет бэкапа дольше интервала инкрементального плюс 15 мин
+таймера, `exordos_db_backup_run_success == 0` дольше одного запуска,
+`exordos_db_backup_archive_missing_segments > 0` и рост
+`pg_stat_archiver_failed_count`.
+
 ## Логи
 
 Базовый образ отправляет журнал каждой ноды в платформенную VictoriaLogs.
@@ -165,6 +215,21 @@ _HOSTNAME:~"^dbaas-dp-<uuid инстанса>-node-" _SYSTEMD_UNIT:"exordos-patr
 
 ```logsql
 _HOSTNAME:~"^dbaas-dp-<uuid инстанса>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
+```
+
+pgBackRest пишет собственные файлы в `/var/log/pgbackrest` (архивация WAL,
+бэкапы, проверки); rsyslog на ноде читает их и отправляет строки в
+VictoriaLogs как syslog с именем приложения `pgbackrest`. На ноде они тоже
+остаются, ротация раз в неделю. Архивация и бэкапы идут на праймари:
+
+```logsql
+hostname:~"^dbaas-dp-<uuid инстанса>-node-" app_name:"pgbackrest"
+```
+
+Неудачные отправки WAL и бэкапы:
+
+```logsql
+hostname:~"^dbaas-dp-<uuid инстанса>-node-" app_name:"pgbackrest" _msg:~"(ERROR|WARN):"
 ```
 
 ## Транзакции, блокировки и обслуживание
@@ -217,8 +282,9 @@ sum by (exordos_db_instance, datname, schemaname, relname) (
 - **PostgreSQL instance**: число праймари, роль каждой ноды, отставание
   репликации и слоты, самая старая транзакция, возраст ID транзакций,
   блокировки, deadlock'и и конфликты, сессии, транзакции, строки, временные
-  файлы, checkpoint'ы, архивация WAL, диски, CPU, память и сеть нод, основные
-  настройки, а также логи Patroni и PostgreSQL с частотой ошибок.
+  файлы, checkpoint'ы, архивация WAL, бэкапы и окно восстановления, диски,
+  CPU, память и сеть нод, основные настройки, а также логи Patroni и
+  PostgreSQL с частотой ошибок.
 - **PostgreSQL tables**: все таблицы выбранных баз с размером, строками,
   мёртвыми строками, сканированиями и последним autovacuum; самые большие
   таблицы, доля мёртвых строк, запись, последовательные сканирования,

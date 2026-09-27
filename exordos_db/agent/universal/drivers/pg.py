@@ -529,6 +529,8 @@ WHERE d.datname not in """
             pgbackrest.clear_backup_error()
         if self.backup is None:
             pgbackrest.mark_stanza_ready(None)
+            # The backup timer no longer runs to remove them
+            pgbackrest.remove_metrics()
 
         if not primary:
             LOG.debug("Not a primary node, skipping the rest of dump_to_dp.")
