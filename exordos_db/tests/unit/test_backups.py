@@ -54,9 +54,11 @@ def _spec(**options):
 
 def _backup(backup_type, stop, error=False):
     return {
+        "label": f"{stop}{backup_type[0].upper()}",
         "type": backup_type,
         "error": error,
         "timestamp": {"start": stop - 60, "stop": stop},
+        "info": {"size": 1000, "repository": {"delta": 100}},
     }
 
 
@@ -308,6 +310,66 @@ class TestChooseBackupType:
             _backup("diff", self.now - 2 * HOUR),
         ]
         assert self._choose(backups) is None
+
+
+class TestMetrics:
+    now = 1_800_000_000
+
+    def _samples(self, info, missing=None, succeeded=True):
+        text = pgbackrest.render_metrics(info, missing, succeeded, self.now)
+        return dict(
+            line.rsplit(" ", 1)
+            for line in text.splitlines()
+            if not line.startswith("#")
+        )
+
+    def test_backups(self):
+        full = _backup("full", self.now - 48 * HOUR, error=True)
+        incr = _backup("incr", self.now - HOUR)
+        samples = self._samples({"backup": [full, incr]}, missing=[])
+
+        labels = f'{{backup_name="{full["label"]}",backup_type="full"}}'
+        assert samples[f"exordos_db_backup_stop_timestamp_seconds{labels}"] == str(
+            full["timestamp"]["stop"]
+        )
+        assert samples[f"exordos_db_backup_size_bytes{labels}"] == "1000"
+        assert samples[f"exordos_db_backup_repo_delta_bytes{labels}"] == "100"
+        assert samples[f"exordos_db_backup_error{labels}"] == "1"
+        assert samples[
+            "exordos_db_backup_recovery_window_start_timestamp_seconds"
+        ] == str(full["timestamp"]["stop"])
+        assert samples["exordos_db_backup_archive_missing_segments"] == "0"
+        assert samples["exordos_db_backup_run_success"] == "1"
+
+    def test_larger_backup_counts_as_a_smaller_one(self):
+        full = _backup("full", self.now - 48 * HOUR)
+        diff = _backup("diff", self.now - 2 * HOUR)
+        samples = self._samples({"backup": [full, diff]})
+
+        last = "exordos_db_backup_last_completion_timestamp_seconds"
+        assert samples[f'{last}{{backup_type="full"}}'] == str(
+            full["timestamp"]["stop"]
+        )
+        assert samples[f'{last}{{backup_type="diff"}}'] == str(
+            diff["timestamp"]["stop"]
+        )
+        assert samples[f'{last}{{backup_type="incr"}}'] == str(
+            diff["timestamp"]["stop"]
+        )
+
+    def test_unreachable_repository(self):
+        samples = self._samples(None, succeeded=False)
+
+        assert samples == {
+            "exordos_db_backup_run_timestamp_seconds": str(self.now),
+            "exordos_db_backup_run_success": "0",
+        }
+
+    def test_labels_are_escaped(self):
+        backup = {**_backup("full", self.now), "label": 'a"b\\c'}
+        text = pgbackrest.render_metrics({"backup": [backup]}, None, True, self.now)
+
+        assert 'backup_name="a\\"b\\\\c"' in text
 
 
 def test_error_starts_at_its_cause(monkeypatch):

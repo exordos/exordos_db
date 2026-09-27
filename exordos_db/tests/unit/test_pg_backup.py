@@ -32,11 +32,19 @@ SPEC = {
 @pytest.fixture
 def backups(monkeypatch):
     """The backups taken; `gap` is what the archive lacks."""
-    taken = types.SimpleNamespace(types=[], gap=[], fail=None, error="old")
+    taken = types.SimpleNamespace(
+        types=[], gap=[], fail=None, error="old", metrics="old"
+    )
+    stop = time.time() - 3600
     info = [
         {
             "backup": [
-                {"type": "full", "timestamp": {"stop": time.time() - 3600}},
+                {
+                    "label": "20260925-100000F",
+                    "type": "full",
+                    "timestamp": {"start": stop - 60, "stop": stop},
+                    "info": {"size": 1000, "repository": {"delta": 100}},
+                },
             ]
         }
     ]
@@ -60,10 +68,17 @@ def backups(monkeypatch):
         pgbackrest, "clear_backup_error", lambda: setattr(taken, "error", None)
     )
     monkeypatch.setattr(
+        pgbackrest, "save_metrics", lambda text: setattr(taken, "metrics", text)
+    )
+    monkeypatch.setattr(
+        pgbackrest, "remove_metrics", lambda: setattr(taken, "metrics", None)
+    )
+    monkeypatch.setattr(
         pg_backup.pg,
         "PatroniClient",
-        lambda: types.SimpleNamespace(is_primary=lambda: True),
+        lambda: types.SimpleNamespace(is_primary=lambda: taken.primary),
     )
+    taken.primary = True
     return taken
 
 
@@ -93,3 +108,28 @@ def test_unreachable_repository_is_reported(backups):
     assert pg_backup.main() == 1
 
     assert backups.error == backups.fail
+
+
+def test_metrics_of_the_backups(backups):
+    assert pg_backup.main() == 0
+
+    assert 'backup_name="20260925-100000F",backup_type="full"' in backups.metrics
+    assert "exordos_db_backup_archive_missing_segments 0" in backups.metrics
+    assert "exordos_db_backup_run_success 1" in backups.metrics
+
+
+def test_failed_run_is_in_the_metrics(backups):
+    backups.fail = "ERROR: [039]: HTTP request failed with 403 (Forbidden)"
+
+    assert pg_backup.main() == 1
+
+    assert "exordos_db_backup_run_success 0" in backups.metrics
+    assert "backup_name" not in backups.metrics
+
+
+def test_replica_removes_the_metrics(backups):
+    backups.primary = False
+
+    assert pg_backup.main() == 0
+
+    assert backups.metrics is None

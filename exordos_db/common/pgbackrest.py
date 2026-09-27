@@ -60,6 +60,9 @@ BACKUP_ERROR_FILE = f"{cc.PATRONI_DIR}/exordos_backup_error.txt"
 ERROR_MAX_LENGTH = 1024
 # Fingerprint of the repository the stanza was created in on this node
 STANZA_MARKER_FILE = f"{cc.WORK_DIR}/backup_stanza.sha256"
+# The backups of the stanza and the last run of the backup timer, written by
+# the timer on the primary, see docs/monitoring.md
+METRICS_FILE = f"{cc.NODE_EXPORTER_TEXTFILE_DIR}/exordos_db_backup.prom"
 
 PG_DATA_DIR = f"{cc.PATRONI_DIR}/data"
 PG_SOCKET_DIR = "/var/run/postgresql"
@@ -243,6 +246,115 @@ def save_backup_error(error: BaseException | str) -> None:
 
 def clear_backup_error() -> bool:
     return _remove(BACKUP_ERROR_FILE)
+
+
+def _label(value: tp.Any) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def render_metrics(
+    info: dict[str, tp.Any] | None,
+    missing: list[str] | None,
+    succeeded: bool,
+    now: float,
+) -> str:
+    """Render the metrics of the backups in the Prometheus text format.
+
+    `info` is the stanza of `pgbackrest info --output=json`, None when the
+    repository couldn't be read; `missing` the WAL segments missing from the
+    archive since the last backup, None when not checked.
+    """
+    metrics: dict[str, tuple[str, list[tuple[str, float]]]] = {}
+
+    def add(name: str, help_: str, value: float, **labels: tp.Any) -> None:
+        samples = metrics.setdefault(f"exordos_db_backup_{name}", (help_, []))[1]
+        text = ",".join(f'{k}="{_label(v)}"' for k, v in labels.items())
+        samples.append((f"{{{text}}}" if text else "", value))
+
+    add("run_timestamp_seconds", "When the backup timer last ran.", now)
+    add(
+        "run_success",
+        "Whether the last run of the backup timer reached the repository and took the backup due.",
+        int(succeeded),
+    )
+
+    backups = (info or {}).get("backup") or []
+    for b in backups:
+        labels = {"backup_name": b["label"], "backup_type": b["type"]}
+        add(
+            "start_timestamp_seconds",
+            "When a backup started.",
+            b["timestamp"]["start"],
+            **labels,
+        )
+        add(
+            "stop_timestamp_seconds",
+            "When a backup finished.",
+            b["timestamp"]["stop"],
+            **labels,
+        )
+        add(
+            "size_bytes",
+            "Size of the database in a backup.",
+            b["info"]["size"],
+            **labels,
+        )
+        add(
+            "repo_delta_bytes",
+            "What a backup added to the repository, compressed.",
+            b["info"]["repository"]["delta"],
+            **labels,
+        )
+        add(
+            "error",
+            "Whether a backup has pages with checksum errors, it restores all the same.",
+            int(bool(b.get("error"))),
+            **labels,
+        )
+
+    # A full backup counts as a differential and an incremental one too, as
+    # a differential one counts as an incremental one
+    covers = {
+        "full": {"full"},
+        "diff": {"full", "diff"},
+        "incr": {"full", "diff", "incr"},
+    }
+    for kind, kinds in covers.items():
+        stops = [b["timestamp"]["stop"] for b in backups if b["type"] in kinds]
+        if stops:
+            add(
+                "last_completion_timestamp_seconds",
+                "When the last backup of the type, or a larger one, finished.",
+                max(stops),
+                backup_type=kind,
+            )
+    if backups:
+        add(
+            "recovery_window_start_timestamp_seconds",
+            "The earliest moment a restore can reach: the end of the oldest backup.",
+            min(b["timestamp"]["stop"] for b in backups),
+        )
+    if missing is not None:
+        add(
+            "archive_missing_segments",
+            "WAL segments missing from the archive since the last backup.",
+            len(missing),
+        )
+
+    lines = []
+    for name, (help_, samples) in metrics.items():
+        lines += [f"# HELP {name} {help_}", f"# TYPE {name} gauge"]
+        lines += [f"{name}{labels} {value}" for labels, value in samples]
+    return "\n".join(lines) + "\n"
+
+
+def save_metrics(content: str) -> None:
+    # Renamed in place, the collector never reads half of it
+    _write(METRICS_FILE, content, 0o644, None)
+
+
+def remove_metrics() -> bool:
+    return _remove(METRICS_FILE)
 
 
 def load_restore_state() -> dict[str, tp.Any] | None:

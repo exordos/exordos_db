@@ -32,3 +32,6 @@ PATRONI_API_ENDPOINT = f"http://127.0.0.1:{PATRONI_API_PORT}"
 # session of the same database.
 VMAGENT_NODE_SD_FILE = f"{WORK_DIR}/vmagent_node.json"
 VMAGENT_DATABASES_SD_FILE = f"{WORK_DIR}/vmagent_databases.json"
+# The textfile collector of node_exporter of the base image reads *.prom
+# files there at every scrape
+NODE_EXPORTER_TEXTFILE_DIR = "/var/lib/exordos/node_exporter"

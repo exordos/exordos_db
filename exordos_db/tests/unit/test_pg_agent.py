@@ -225,6 +225,7 @@ class FakeRepository:
             "load_backup_error",
             "save_backup_error",
             "clear_backup_error",
+            "remove_metrics",
         ):
             monkeypatch.setattr(pg.pgbackrest, name, getattr(self, name))
 
@@ -268,6 +269,10 @@ class FakeRepository:
         removed = self.error is not None
         self.error = None
         return removed
+
+    def remove_metrics(self):
+        self.calls.append(("remove_metrics",))
+        return False
 
 
 def _managed_node(psql, pclient, backup):
@@ -365,6 +370,15 @@ def test_archiving_stops_before_the_config_is_removed(monkeypatch):
     assert events[0][1]["postgresql"]["parameters"]["archive_command"] == (
         pg.pgbackrest.archive_command(None)
     )
+
+
+def test_disabled_backups_leave_no_metrics(monkeypatch):
+    repository = FakeRepository(monkeypatch, stanza_ready=True)
+    instance = _managed_node(FakePsql(), FakePatroni(primary=True), None)
+
+    instance.dump_to_dp()
+
+    assert ("remove_metrics",) in repository.calls
 
 
 def test_replica_leaves_the_repository_and_roles_alone(monkeypatch):

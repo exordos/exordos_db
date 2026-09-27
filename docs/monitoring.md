@@ -150,6 +150,57 @@ Size of `pg_wal` on each node:
 max by (exordos_db_instance, instance) (pg_wal_size_bytes)
 ```
 
+## Backups
+
+With backups on, the backup timer (`exordos-db-pg-backup`, every 15 min) reads
+`pgbackrest info` on the primary and writes what it finds to
+`/var/lib/exordos/node_exporter/exordos_db_backup.prom`, which the
+node_exporter of the base image serves (its textfile collector, in
+`exordos_base` 1.3.5 or later). A replica, and a node whose instance has backups off,
+removes the file. The series come through the `node_exporter` job with the
+labels above; a former primary keeps its file until its next run, so the
+queries take the current primary only.
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `exordos_db_backup_start_timestamp_seconds`, `exordos_db_backup_stop_timestamp_seconds` | `backup_name`, `backup_type` | when a backup in the repository started and finished |
+| `exordos_db_backup_size_bytes` | `backup_name`, `backup_type` | size of the database in a backup |
+| `exordos_db_backup_repo_delta_bytes` | `backup_name`, `backup_type` | what a backup added to the repository, compressed |
+| `exordos_db_backup_error` | `backup_name`, `backup_type` | 1 if a backup has pages with checksum errors; it restores all the same |
+| `exordos_db_backup_last_completion_timestamp_seconds` | `backup_type` | when the last backup of the type finished; a full one counts as `diff` and `incr` too, a `diff` one as `incr` |
+| `exordos_db_backup_recovery_window_start_timestamp_seconds` | | the earliest moment a restore can reach, the end of the oldest backup |
+| `exordos_db_backup_archive_missing_segments` | | WAL segments missing from the archive since the last backup; a restore past them needs a backup taken later, which the timer takes |
+| `exordos_db_backup_run_timestamp_seconds`, `exordos_db_backup_run_success` | | the last run of the timer, and whether it read the repository and took the backup due |
+
+A restore reaches from the start of the window to the last WAL archived,
+`pg_stat_archiver_last_archive_age` ago. PostgreSQL switches a segment after
+`archive_timeout` (300 s) only if something was written to it, so on an idle
+instance the age grows while nothing is lost.
+
+Time since the last backup of any type, of the current primary:
+
+```promql
+time() - max by (exordos_db_instance) (
+  exordos_db_backup_last_completion_timestamp_seconds{backup_type="incr"}
+  and on (instance) (patroni_primary == 1)
+)
+```
+
+The recovery window, in seconds:
+
+```promql
+max by (exordos_db_instance) (
+  time() - pg_stat_archiver_last_archive_age
+  - on (instance) group_left exordos_db_backup_recovery_window_start_timestamp_seconds
+  and on (instance) (patroni_primary == 1)
+)
+```
+
+Worth an alert: no backup for longer than the incremental interval plus the
+15 min of the timer, `exordos_db_backup_run_success == 0` for more than one
+run, `exordos_db_backup_archive_missing_segments > 0`, and a growing
+`pg_stat_archiver_failed_count`.
+
 ## Logs
 
 The base image relays the journal of every node to the platform VictoriaLogs.
@@ -166,6 +217,21 @@ Errors only:
 
 ```logsql
 _HOSTNAME:~"^dbaas-dp-<instance uuid>-node-" _SYSTEMD_UNIT:"exordos-patroni.service" _msg:~"(ERROR|FATAL|PANIC):"
+```
+
+pgBackRest writes its own files in `/var/log/pgbackrest` (WAL archiving,
+backups, checks); rsyslog on the node reads them and sends their lines to
+VictoriaLogs as syslog with the app name `pgbackrest`. They are kept on the
+node too, rotated weekly. Archiving and backups happen on the primary:
+
+```logsql
+hostname:~"^dbaas-dp-<instance uuid>-node-" app_name:"pgbackrest"
+```
+
+Failed WAL pushes and backups:
+
+```logsql
+hostname:~"^dbaas-dp-<instance uuid>-node-" app_name:"pgbackrest" _msg:~"(ERROR|WARN):"
 ```
 
 ## Transactions, locks and maintenance
@@ -218,8 +284,9 @@ the shared observability Grafana, per project and instance. It depends on the
 - **PostgreSQL instance**: primaries, role of each node, replication lag and
   slots, oldest transaction, transaction ID age, locks, deadlocks and
   conflicts, sessions, transactions, rows, temporary files, checkpoints, WAL
-  archiving, disks, CPU, memory and network of the nodes, the main settings,
-  and the Patroni and PostgreSQL logs with the error rate.
+  archiving, backups and the recovery window, disks, CPU, memory and network
+  of the nodes, the main settings, and the Patroni and PostgreSQL logs with
+  the error rate.
 - **PostgreSQL tables**: every table of the chosen databases with its size,
   rows, dead rows, scans and last autovacuum, the largest tables, dead row
   share, writes, sequential scans, cache hit ratio and vacuums.
