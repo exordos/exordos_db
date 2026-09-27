@@ -109,6 +109,16 @@ sudo systemctl disable --now "postgresql@${PG_VERSION}-main"
 sudo systemctl disable --now postgresql
 sudo ln -s /usr/lib/postgresql/$PG_VERSION/bin/* /usr/sbin/
 
+# PostgreSQL metrics for the vmagent of the base image, run by our own unit
+sudo apt -y install prometheus-postgres-exporter
+sudo systemctl disable --now prometheus-postgres-exporter
+sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter.service" $SYSTEMD_SERVICE_DIR
+sudo cp "$GC_PATH/etc/systemd/exordos-postgres-exporter-databases.service" $SYSTEMD_SERVICE_DIR
+sudo systemctl enable exordos-postgres-exporter exordos-postgres-exporter-databases
+# In place of the scrape config of the base image, which only scrapes
+# node_exporter
+sudo cp "$GC_PATH/etc/exordos_observability/vmagent_scrape.yml.tpl" /etc/exordos_observability/
+
 # Setup watchdog
 cat <<EOF | sudo tee /etc/udev/rules.d/99-watchdog.rules
 KERNEL=="watchdog", OWNER="postgres", GROUP="postgres"

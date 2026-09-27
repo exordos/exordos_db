@@ -1,0 +1,33 @@
+[Unit]
+Description=Exordos PostgreSQL exporter of per-database statistics (Prometheus)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Peer authentication over the local socket, no password to deliver
+User=postgres
+Group=postgres
+# Not scraped: vmagent calls /probe with a target per database. A target has
+# to be a URL, the exporter mangles the socket path of a key=value one.
+Environment="DATA_SOURCE_NAME=postgresql://postgres@/postgres?host=/var/run/postgresql&sslmode=disable"
+# Only the per-table statistics and the vacuum progress, the instance-wide
+# ones come from exordos-postgres-exporter once
+ExecStart=/usr/bin/prometheus-postgres-exporter \
+    --web.listen-address=127.0.0.1:9188 \
+    --disable-default-metrics \
+    --disable-settings-metrics \
+    --no-collector.database \
+    --no-collector.locks \
+    --no-collector.replication \
+    --no-collector.replication_slot \
+    --no-collector.roles \
+    --no-collector.stat_bgwriter \
+    --no-collector.stat_database \
+    --no-collector.wal
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

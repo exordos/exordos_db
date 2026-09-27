@@ -277,6 +277,7 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
                     # reach the nodes
                     name=str(instance.uuid),
                     instance=instance,
+                    project_id=instance.project_id,
                     nodes_number=instance.nodes_number,
                     sync_replica_number=instance.sync_replica_number,
                     users=users,
