@@ -466,6 +466,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#backups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restoring-to-a-point-in-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restoring to a Point in Time
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#validation-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -989,6 +1011,146 @@
 <span class="w">  </span><span class="nt">"owner"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/v1/types/postgres/instances/INSTANCE_UUID/users/USER_UUID"</span>
 <span class="p">}</span>
 </code></pre></div>
+<h2 id="backups">Backups<a class="headerlink" href="#backups" title="Permanent link">#</a></h2>
+<p>Setting <code>backup</code> on an instance enables continuous WAL archiving and periodic
+backups with <a href="https://pgbackrest.org/">pgBackRest</a>. The storage is described
+in full by the user: DBaaS neither creates buckets nor manages credentials, so
+the S3 lifecycle belongs to manifests and other elements.
+In the repository, <code>exordos/manifests/examples/example_pg_backup.yaml</code> backs
+an instance up to a bucket of the communal S3 instance and
+<code>example_pg_restore.yaml</code> next to it starts a new one from its backups.</p>
+<p>Updating the DBaaS element doesn't reinstall the nodes of existing instances
+at once. They keep the agent they were created with, which doesn't know
+backups, until the first change of the instance reinstalls them from the new
+image, keeping the data disk. Setting <code>backup</code> is such a change, so backups
+are taken by the reinstalled nodes.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"backup"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"s3"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"endpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://10.20.0.30:9000"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"bucket"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dbaas-backups"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"access_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"backup"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"secret_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"secret"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="s2">"us-east-1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"uri_style"</span><span class="p">:</span><span class="w"> </span><span class="s2">"path"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"verify_tls"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/exordos_db"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"encryption_key"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"full_interval_hours"</span><span class="p">:</span><span class="w"> </span><span class="mi">168</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"incr_interval_hours"</span><span class="p">:</span><span class="w"> </span><span class="mi">24</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"retention_full"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>endpoint</code> is <code>http://</code> or <code>https://</code> with an optional port and no path.</li>
+<li><code>uri_style</code> is <code>path</code> (default, required for IP endpoints) or <code>host</code>.</li>
+<li>The instance uuid is the pgBackRest stanza, so instances may share a bucket
+  and a <code>path</code>.</li>
+<li><code>encryption_key</code> turns on repository encryption (<code>aes-256-cbc</code>). Backups
+  can't be restored without it. Use it when the storage is reached over plain
+  HTTP.</li>
+<li>A full backup is taken every <code>full_interval_hours</code>, an incremental one every
+  <code>incr_interval_hours</code>; <code>retention_full</code> full backups are kept together with
+  their incremental backups and WAL.</li>
+<li>Setting <code>backup</code> to <code>null</code> stops archiving. Backups already in the storage
+  are left there.</li>
+</ul>
+<p>Credentials are stored in the instance and returned by the API to everyone who
+can read the instance.</p>
+<p>On the data plane the agent renders <code>/etc/pgbackrest/pgbackrest.conf</code> on every
+node, creates the stanza on the primary and sets <code>archive_command</code> through the
+Patroni DCS. <code>exordos-db-pg-backup.timer</code> runs every 15 minutes on every node
+and takes a backup on the primary when one is due. WAL is archived
+continuously in between: whatever was written is in the storage within about
+five minutes, which is what a restore to the latest moment may lose. When the
+storage is unreachable WAL is kept up to a quarter of <code>disk_size</code> and dropped
+after that, so the database keeps running at the cost of a gap in
+point-in-time recovery.
+Archiving is turned on only once the stanza is created; until then users,
+databases and replication settings are applied as usual, and the agent keeps
+retrying.</p>
+<p>The read-only <code>backup_status</code> of the instance tells whether the storage can
+be used, as the primary finds it:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"backup_status"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ERROR: [039]: HTTP request failed with 403 (Forbidden) ..."</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>error</code> is why the last attempt failed: the agent creating the stanza, the
+  timer reading the backups or taking one. Wrong credentials, a missing
+  bucket or an unreachable storage show up here. It is <code>null</code> once an attempt
+  succeeds, and is cleared when <code>backup</code> changes.</li>
+<li><code>backup_status</code> is <code>null</code>, and left out by the API, while backups are off
+  or before the primary has reported. A working storage gives
+  <code>{"error": null}</code>.</li>
+</ul>
+<p>WAL can go missing from the archive: a primary that goes down before it has
+archived its last segments, WAL dropped while the storage was unreachable.
+Nothing past a missing segment can be restored until a backup is taken past
+it, so the timer takes one as soon as it finds such a gap, and logs the
+segments that are missing. Moments between the gap and that backup can't be
+restored to.</p>
+<h2 id="restoring-to-a-point-in-time">Restoring to a Point in Time<a class="headerlink" href="#restoring-to-a-point-in-time" title="Permanent link">#</a></h2>
+<p>A new instance can start from the backups of another one instead of an empty
+database. <code>restore_from</code> is set on creation only; the source instance may
+already be deleted, its backups are found by the storage and the stanza.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"restored-postgres"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"cpu"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"ram"</span><span class="p">:</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"disk_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"nodes_number"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sync_replica_number"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/v1/types/postgres/versions/VERSION_UUID"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"restore_from"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"s3"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"endpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://10.20.0.30:9000"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"bucket"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dbaas-backups"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"access_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"backup"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"secret_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"secret"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/exordos_db"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"stanza"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SOURCE_INSTANCE_UUID"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-14T10:30:00Z"</span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>The storage fields and <code>encryption_key</code> are the same as in <code>backup</code> of the
+  source instance.</li>
+<li><code>stanza</code> is the uuid of the source instance.</li>
+<li><code>target</code> is where the recovery stops:<ul>
+<li><code>{"kind": "latest"}</code> (default): replay the whole archive;</li>
+<li><code>{"kind": "time", "time": "2026-09-14T10:30:00Z"}</code>: recover to that
+  moment. A time in the future is rejected. It has to be after the end
+  of the oldest kept full backup; a time past the last archived WAL
+  recovers to the end of the archive.</li>
+</ul>
+</li>
+<li><code>version</code> and <code>disk_size</code> must fit the backup: the same PostgreSQL major
+  version and enough space for the data.</li>
+<li>The new instance doesn't take backups unless its own <code>backup</code> is set. It
+  uses its own stanza, so the source's backups stay intact even in the same
+  bucket and <code>path</code>.</li>
+</ul>
+<p>Patroni bootstraps the cluster with <code>exordos-db-pg-restore</code>, which runs
+<code>pgbackrest restore</code>; PostgreSQL replays WAL up to the target and is promoted,
+replicas are cloned from it afterwards.</p>
+<p>The instance stays <code>IN_PROGRESS</code> until the recovery is over and its users
+and databases are imported. Meanwhile the read-only <code>restore_status</code> shows
+how the restore goes, <code>{"phase": "restoring" | "recovering" | "failed",
+"error": ...}</code>, and is <code>null</code> once it's over. Each node attempts the restore
+three times. When the restore fails on every node trying it, <code>error</code> says
+why and the instance turns <code>ERROR</code>: no backup before the target, a wrong key
+or stanza, an unreachable storage. Such an instance is deleted and created
+again with a fixed <code>restore_from</code>.</p>
+<p>Users and databases of the restored cluster appear in the API once the
+recovery is over. Imported users have no <code>password</code> (<code>null</code>) and keep their
+password hashes, so existing clients keep working; setting <code>password</code> changes
+it as usual. Users without a password and databases owned by roles DBaaS
+doesn't manage (e.g. <code>postgres</code>) aren't imported and get dropped.</p>
 <h2 id="validation-rules">Validation Rules<a class="headerlink" href="#validation-rules" title="Permanent link">#</a></h2>
 <h3 id="instance-validation">Instance Validation<a class="headerlink" href="#instance-validation" title="Permanent link">#</a></h3>
 <ul>
