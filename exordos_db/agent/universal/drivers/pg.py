@@ -16,10 +16,13 @@
 from __future__ import annotations
 
 from functools import wraps
+import json
 import logging
+import os
 import subprocess
 import time
 import typing as tp
+from urllib import parse as urlparse
 
 from gcl_sdk.agents.universal.drivers import meta
 from gcl_sdk.infra import constants as pc
@@ -48,6 +51,76 @@ BACKUP_UNSETTLED = {"state": "unsettled"}
 # stanza-create talks to the repository on every iteration until it
 # succeeds, the rest of the node waits for it meanwhile
 STANZA_CREATE_TIMEOUT = 60
+
+
+def scrape_labels(instance: str, project_id: str | None) -> dict[str, str]:
+    """Return the labels of every series of the node.
+
+    exordos_db_type tells the series of the engine apart from those of the
+    other engines' nodes, which carry the same labels.
+    """
+    labels = {"exordos_db_instance": instance, "exordos_db_type": "postgres"}
+    # Sent by a control plane that knows it
+    if project_id is not None:
+        labels["exordos_project"] = project_id
+    return labels
+
+
+def node_scrape_targets(labels: dict[str, str]) -> list[dict[str, tp.Any]]:
+    """Return the vmagent file_sd target of the node.
+
+    Every job of the node scrapes it, each at the address of its endpoint.
+    """
+    return [{"targets": ["node"], "labels": labels}]
+
+
+def database_scrape_targets(
+    names: tp.Iterable[str], labels: dict[str, str]
+) -> list[dict[str, tp.Any]]:
+    """Return the vmagent file_sd targets of the per-database exporter.
+
+    The target is the database name, which vmagent replaces with the address
+    of the exporter; the DSN to probe goes in __param_target. It has to be a
+    URL: the exporter mangles the socket path of a key=value one. The
+    database label keeps apart the series every probe has, such as up; it
+    isn't datname, which the per-table series already carry.
+    """
+    return [
+        {
+            "targets": [name],
+            "labels": {
+                **labels,
+                "database": name,
+                "__param_target": (
+                    f"postgresql://postgres@/{urlparse.quote(name, safe='')}"
+                    "?host=/var/run/postgresql&sslmode=disable"
+                ),
+            },
+        }
+        for name in sorted(names)
+    ]
+
+
+def write_scrape_targets(path: str, targets: list[dict[str, tp.Any]]) -> bool:
+    """Write a file_sd file if it changed, return whether it did.
+
+    Every node writes them, a replica has the same databases as the primary.
+    """
+    content = json.dumps(targets, indent=2) + "\n"
+    try:
+        with open(path) as f:
+            if f.read() == content:
+                return False
+    except FileNotFoundError:
+        pass
+
+    # vmagent may read it at any moment, so replace it at once
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w") as f:
+        f.write(content)
+    os.chmod(tmp_path, 0o644)
+    os.replace(tmp_path, path)
+    return True
 
 
 def get_ttl_hash(seconds=600):
@@ -158,6 +231,8 @@ class PGInstance(meta.MetaDataPlaneModel):
         default=pc.InstanceStatus.ACTIVE.value,
     )
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
+    # Labels the metrics of the node, None from a control plane older than it
+    project_id = properties.property(ra_types.AllowNone(ra_types.UUID()), default=None)
     # Sent by the control plane until it has imported the users and databases
     # of a restored cluster: the agent leaves them alone and reports them
     adopt_roles = properties.property(ra_types.Boolean(), default=False)
@@ -184,6 +259,7 @@ class PGInstance(meta.MetaDataPlaneModel):
         "name",
         "nodes_number",
         "adopt_roles",
+        "project_id",
     }
 
     def __init__(self, *args, **kwargs):
@@ -326,6 +402,21 @@ WHERE d.datname not in """
 
         for aname, aowner in actual_dbs.items():
             self.databases[aname] = {"owner": aowner}
+
+    def _update_scrape_targets(
+        self, path: str, targets: list[dict[str, tp.Any]]
+    ) -> None:
+        # Monitoring must not get in the way of the instance
+        try:
+            if write_scrape_targets(path, targets):
+                LOG.info("Scrape targets updated in %s", path)
+        except OSError:
+            LOG.exception("Failed to write the scrape targets to %s", path)
+
+    def _scrape_labels(self) -> dict[str, str]:
+        # The control plane names the resource of the node after the instance
+        project_id = None if self.project_id is None else str(self.project_id)
+        return scrape_labels(self.name, project_id)
 
     def _reconcile_DCS(self, archiving: bool = True) -> None:
         sync_enabled = self.nodes_number > 1 and self.sync_replica_number
@@ -482,6 +573,10 @@ WHERE d.datname not in """
         return {"phase": state["phase"], "error": state["error"]}
 
     def restore_from_dp(self) -> None:
+        # The node is scraped while PostgreSQL is down too
+        self._update_scrape_targets(
+            constants.VMAGENT_NODE_SD_FILE, node_scrape_targets(self._scrape_labels())
+        )
         # The restore in progress is all there is to report, PostgreSQL may
         # well be down
         self.restore_state = self._bootstrap_state()
@@ -494,6 +589,10 @@ WHERE d.datname not in """
         self.databases = {}
         self._fill_actual_users()
         self._fill_actual_databases()
+        self._update_scrape_targets(
+            constants.VMAGENT_DATABASES_SD_FILE,
+            database_scrape_targets(self.databases, self._scrape_labels()),
+        )
         config = self.c.pclient.config_get()
         self._fill_DCS(config)
         self._fill_backup(config)

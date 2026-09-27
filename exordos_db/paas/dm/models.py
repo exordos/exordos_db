@@ -46,6 +46,8 @@ class PGInstanceNode(
     sync_replica_number = properties.property(
         ra_types.Integer(min_value=0, max_value=15)
     )
+    # Labels the metrics of the nodes
+    project_id = properties.property(ra_types.AllowNone(ra_types.UUID()), default=None)
     # pgBackRest spec, see exordos_db.common.pgbackrest
     backup = properties.property(ra_types.AllowNone(ra_types.Dict()), default=None)
     # Until the users and databases of a restored cluster are imported: the
@@ -80,6 +82,10 @@ class PGInstanceNode(
             "nodes_number",
             "databases",
             "users",
+            # Always, the metrics of every node need it. The agent of a node
+            # older than it skips it (gcl_sdk 3.3.0 on, exordos_db 2.5.0)
+            # and doesn't match the target hash until the node is reinstalled
+            "project_id",
         }
         # Only when set: the agent of a node created before them would never
         # match the target hash, to a newer one missing is the default

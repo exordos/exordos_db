@@ -24,3 +24,9 @@ The platform consists of:
 - IaaS entities orchestration
 - PaaS entities orchestration
 - Data Plane image builder
+
+## Monitoring
+
+See [docs/monitoring.md](docs/monitoring.md) for the metrics and logs the nodes
+send to the observability element, the Grafana dashboards, and how to query
+them, how full the disks are included.

@@ -359,6 +359,8 @@ def test_restore_fields_are_sent_to_a_node_only_when_set():
         "sync_replica_number",
         "users",
         "databases",
+        # Always: the metrics of every node need it
+        "project_id",
     }
     node.backup = {"stanza": "s"}
     assert node.to_ua_resource().value["backup"] == {"stanza": "s"}
