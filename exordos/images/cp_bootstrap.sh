@@ -35,6 +35,7 @@ export IAM_USER_PASS="${IAM_USER_PASS:-exordos_db}"
 export PROJECT_ID="${PROJECT_ID}"
 export GC_HS256_JWKS_ENCRYPTION_KEY="${GC_HS256_JWKS_ENCRYPTION_KEY:-}"
 export AUDIENCE="${AUDIENCE:-}"
+export IAM_CLIENT_UUID="${IAM_CLIENT_UUID:-00000000-0000-0000-0000-000000000000}"
 
 export GC_PG_USER="${GC_PG_USER:-exordos_db}"
 export GC_PG_PASS="${GC_PG_PASS:-$(generate_secure_password)}"
@@ -81,6 +82,15 @@ if [[ ! -f $SERVICE_CONFIG ]]; then
     setup_postgresql_user_and_db "$GC_PG_USER" "$GC_PG_PASS" "$GC_PG_DB"
     try_generate_config $SERVICE_CONFIG
     try_generate_config $CORE_AGENT_CONFIG
+fi
+
+# The config is kept on the persistent disk, so one written before the IAM
+# client was configurable verifies tokens with the keys of the wrong client
+IAM_ENDPOINT="http://core.local.genesis-core.tech:80/api/core/v1/iam/clients/${IAM_CLIENT_UUID}"
+if grep -q '^iam_endpoint *=' "$SERVICE_CONFIG"; then
+    sudo sed -i "s|^iam_endpoint *=.*|iam_endpoint = ${IAM_ENDPOINT}|" "$SERVICE_CONFIG"
+else
+    sudo sed -i "s|^\[iam\]$|[iam]\niam_endpoint = ${IAM_ENDPOINT}|" "$SERVICE_CONFIG"
 fi
 
 source "$GC_PATH"/.venv/bin/activate
