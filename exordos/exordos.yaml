@@ -79,6 +79,3 @@ build:
     # grafanaaas plugin, so it needs no image or wheel of its own.
     - manifest: manifests/dbaas_dashboard.yaml.j2
     - manifest: manifests/communal_pg_cluster.yaml.j2
-    # DBaaS page of the ecosystem account, built with the ecosystem UI
-    # constructor. Depends on the `exordos_ecosystem` element only.
-    - manifest: manifests/dbaas_ui.yaml.j2
