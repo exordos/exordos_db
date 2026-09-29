@@ -1,0 +1,3047 @@
+# DBaaS page manifest for exordos_ecosystem.
+#
+# Builds a "Базы данных" entry in the left menu of the ecosystem account and
+# the page behind it: the PostgreSQL instances of the project as a table, a
+# search over them, an instance opened in place of the table with its size
+# edited where it is read, its users and its databases listed and created
+# beside it, and a create form in a modal window.
+#
+# The page talks to the DBaaS user API through the core load balancer
+# (`/api/dbaas/`, see dbaas.yaml.j2). Inside a realm session the requests go to
+# that realm, so the page lists the instances of the installation the visitor
+# is working in. The element therefore doesn't require dbaas itself: the
+# ecosystem it is installed next to may run without it.
+#
+# It is built by `make build` beside the dbaas element and installed from the
+# build output:
+#   exordos em elements install \
+#     output/exordos-elements/dbaas_ui/<version>/manifests/dbaas_ui.yaml
+#
+# The conventions of the ecosystem's own pages
+# (exordos_ecosystem/exordos/manifests/ecosystem_ui_nodes.yaml.j2) hold here:
+# every `props` block spells out ALL fields of its kind (the agent hashes the
+# whole value it reads back), the tree is built with `parent_uuid`, siblings
+# are ordered by `position`, and the page is filed under the ecosystem's own
+# project — the administration project, so it is read by every account.
+# Pinned uuids start with `db5a` to stay apart from the ecosystem's pages.
+
+name: "dbaas_ui"
+description: "DBaaS page built with the ecosystem UI constructor"
+schema_version: 1
+version: "{{ version }}"
+api_version: "v1"
+
+requirements:
+  exordos_ecosystem:
+    from_version: "0.0.0"
+  core:
+    from_version: "0.0.0"
+
+imports:
+  eco_project:
+    element: "$exordos_ecosystem"
+    kind: "resource"
+    link: "$core.iam.projects.$eco_project"
+
+resources:
+  $exordos_ecosystem.ui.components:
+
+    # Root of the page. The sidebar item at the end of the file
+    # points at this component.
+    pg_page:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: panel
+        name: "pg-page"
+        description: "Базы данных"
+        width: null
+        height: null
+        stretch: true
+        padding_top: 20
+        padding_right: 20
+        padding_bottom: 20
+        padding_left: 20
+        position: 0
+        direction: column
+        gap: 16
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: null
+        css: ""
+        conditional_visibility:
+          kind: always
+        background_color: "var(--ui-page-bg)"
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 12
+        action:
+          kind: dummy
+        translations: []
+
+    pg_heading:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-heading"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Базы данных PostgreSQL"
+        font_size: 20
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "PostgreSQL databases"
+
+    pg_summary:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-summary"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Инстансы PostgreSQL текущего проекта, их пользователи и базы данных."
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "PostgreSQL instances of the current project, their users and databases."
+
+    pg_toolbar:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-toolbar"
+        description: ""
+        width: null
+        height: 36
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: row
+        gap: 8
+        justify_content: flex-start
+        align_items: center
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_search:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: search
+        name: "pg-search"
+        description: ""
+        width: null
+        height: 36
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_toolbar:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        placeholder: "Поиск по имени, UUID и адресу"
+        table_uuid: $exordos_ecosystem.ui.components.$pg_instances_table:uuid
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: placeholder
+            value: "Search by name, UUID, or IPv4"
+
+    pg_create_button:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: button
+        name: "pg-create-button"
+        description: ""
+        width: 180
+        height: 36
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_toolbar:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.pg_instance.create"
+        label: "Создать инстанс"
+        background_color: "var(--ui-accent)"
+        text_color: "var(--ui-accent-fg)"
+        action:
+          kind: open_window
+          window_uuid: $exordos_ecosystem.ui.components.$pg_create_window:uuid
+          method: GET
+          url: ""
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: label
+            value: "Create instance"
+
+    pg_instances_source:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: data_source
+        name: "pg-instances-source"
+        description: "Инстансы PostgreSQL"
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        url: "/api/dbaas/v1/types/postgres/instances/"
+        method: GET
+        refresh_method:
+          kind: periodic
+          seconds: 5
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    # The versions an instance is created from. The create form
+    # offers them in a dropdown.
+    pg_versions_source:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: data_source
+        name: "pg-versions-source"
+        description: "Версии PostgreSQL"
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        url: "/api/dbaas/v1/types/postgres/versions/"
+        method: GET
+        refresh_method:
+          kind: once
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    # An instance is several nodes, so its addresses are a list and
+    # the cell writes it out whole. The table reloads its own source
+    # once a delete is answered, so the row leaves the list on its own.
+    pg_instances_table:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: table
+        name: "pg-instances-table"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 3
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        data_source_uuid: $exordos_ecosystem.ui.components.$pg_instances_source:uuid
+        columns:
+          - path: "name"
+            header: "Название"
+          - path: "status"
+            header: "Статус"
+            format: status
+          - path: "ipsv4"
+            header: "IPv4"
+          - path: "cpu"
+            header: "CPU"
+          - path: "ram"
+            header: "RAM, МБ"
+          - path: "disk_size"
+            header: "Диск, ГБ"
+          - path: "nodes_number"
+            header: "Ноды"
+          - path: "created_at"
+            header: "Создан"
+        background_color: ""
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 8
+        page_size: 20
+        grid_lines: both
+        row_actions:
+          - kind: open_window
+            label: "Открыть"
+            window_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+            method: GET
+            url: "/api/dbaas/v1/types/postgres/instances/{uuid}"
+          - kind: request
+            label: "Удалить"
+            method: DELETE
+            url: "/api/dbaas/v1/types/postgres/instances/{uuid}"
+            confirm: "Удалить инстанс «{name}» вместе с его базами данных?"
+          - kind: copy
+            label: "Коп. UUID"
+            path: "uuid"
+        translations:
+          - locale: en
+            field: columns.0.header
+            value: "Name"
+          - locale: en
+            field: columns.1.header
+            value: "Status"
+          - locale: en
+            field: columns.4.header
+            value: "RAM, MB"
+          - locale: en
+            field: columns.5.header
+            value: "Disk, GB"
+          - locale: en
+            field: columns.6.header
+            value: "Nodes"
+          - locale: en
+            field: columns.7.header
+            value: "Created"
+          - locale: en
+            field: row_actions.0.label
+            value: "Open"
+          - locale: en
+            field: row_actions.1.label
+            value: "Delete"
+          - locale: en
+            field: row_actions.1.confirm
+            value: "Delete the instance «{name}» with its databases?"
+          - locale: en
+            field: row_actions.2.label
+            value: "Copy UUID"
+
+    pg_instance_window:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: window
+        name: "pg-instance-window"
+        description: ""
+        width: 760
+        height: 560
+        stretch: true
+        padding_top: 20
+        padding_right: 20
+        padding_bottom: 20
+        padding_left: 20
+        position: 4
+        direction: column
+        gap: 16
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        background_color: "var(--ui-page-bg)"
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 12
+        action:
+          kind: dummy
+        title: "Инстанс PostgreSQL"
+        left: 200
+        top: 140
+        placement: in_place
+        auto_close_ms: 0
+        translations:
+          - locale: en
+            field: title
+            value: "PostgreSQL instance"
+
+    pg_instance_back:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: button
+        name: "pg-instance-back"
+        description: ""
+        width: 280
+        height: 28
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: "background-color: transparent; border-color: transparent; color: var(--ui-text-muted); justify-content: flex-start"
+        conditional_visibility:
+          kind: always
+        label: "← К списку инстансов"
+        background_color: ""
+        text_color: ""
+        action:
+          kind: close_window
+          window_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: label
+            value: "← Back to instances"
+
+    pg_instance_title:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-title"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "context://name"
+        font_size: 22
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    # Pinned uuid: the instance the window is opened on, read again
+    # every few seconds. The status and the addresses below follow it
+    # while the instance is being built, and the row actions of the
+    # users and databases tables address the instance through it: a
+    # row action fills its url from the row, and a user or a database
+    # names its instance by uri rather than by uuid.
+    pg_instance_record_source:
+      uuid: "db5a0001-0000-4000-8000-000000000001"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: data_source
+        name: "pg-instance-record-source"
+        description: "Открытый инстанс"
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        url: "/api/dbaas/v1/types/postgres/instances/{uuid}"
+        method: GET
+        refresh_method:
+          kind: periodic
+          seconds: 5
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_fields:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-fields"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_status_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-status-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_status_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-status-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_status_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Статус"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Status"
+
+    pg_instance_status_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-status-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_status_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/status"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_ipsv4_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-ipsv4-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_ipsv4_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-ipsv4-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_ipsv4_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "IPv4"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_ipsv4_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-ipsv4-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_ipsv4_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/ipsv4"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_cpu_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-cpu-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_cpu_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-cpu-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_cpu_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "CPU"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_cpu_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-cpu-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_cpu_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/cpu"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_ram_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-ram-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 3
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_ram_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-ram-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_ram_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "RAM, МБ"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "RAM, MB"
+
+    pg_instance_ram_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-ram-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_ram_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/ram"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_disk_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-disk-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 4
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_disk_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-disk-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_disk_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Диск, ГБ"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Disk, GB"
+
+    pg_instance_disk_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-disk-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_disk_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/disk_size"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_nodes_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-nodes-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 5
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_nodes_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-nodes-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_nodes_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Ноды"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Nodes"
+
+    pg_instance_nodes_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-nodes-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_nodes_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/nodes_number"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_sync_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-sync-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 6
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_sync_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-sync-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_sync_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Синхронные реплики"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Synchronous replicas"
+
+    pg_instance_sync_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-sync-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_sync_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "datasource://db5a0001-0000-4000-8000-000000000001/sync_replica_number"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_uuid_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-uuid-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 7
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_uuid_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-uuid-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_uuid_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "UUID"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_uuid_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-uuid-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_uuid_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "context://uuid"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_instance_created_row:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-instance-created-row"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 8
+        direction: row
+        gap: 12
+        justify_content: flex-start
+        align_items: baseline
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_fields:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_instance_created_caption:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-created-caption"
+        description: ""
+        width: 200
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_created_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Создан"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Created"
+
+    pg_instance_created_value:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-instance-created-value"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_created_row:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "context://created_at"
+        font_size: 13
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_edit_rule:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: line
+        name: "pg-edit-rule"
+        description: ""
+        width: 720
+        height: 8
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 3
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.pg_instance.update"
+        x1: 0
+        y1: 4
+        x2: 720
+        y2: 4
+        thickness: 1
+        color: "var(--ui-border)"
+        line_style: solid
+        translations: []
+
+    # The size of the instance is edited where it is read. The
+    # separator and the panel are shown under
+    # `exordos_db.pg_instance.update`, the permission the platform
+    # names when it refuses the write.
+    pg_edit_panel:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: panel
+        name: "pg-edit-panel"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 12
+        padding_right: 12
+        padding_bottom: 12
+        padding_left: 12
+        position: 4
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.pg_instance.update"
+        background_color: "var(--ui-surface)"
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 8
+        action:
+          kind: dummy
+        translations: []
+
+    pg_edit_heading:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-edit-heading"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Изменить инстанс"
+        font_size: 16
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Edit the instance"
+
+    # `{uuid}` is filled from the record the window was opened on,
+    # so the form writes back to the instance it is showing. A field
+    # takes its value when it mounts and an in-place window mounts
+    # its contents afresh every time it is opened, so the form always
+    # opens on what the instance holds now. The disk only grows: the
+    # platform refuses to shrink it.
+    pg_edit_form:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: form
+        name: "pg-edit-form"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        url: "/api/dbaas/v1/types/postgres/instances/{uuid}"
+        method: PUT
+        body_format: json
+        body: '{"cpu": "component://db5a0008-0000-4000-8000-000000000008/value", "ram": "component://db5a0009-0000-4000-8000-000000000009/value", "disk_size": "component://db5a000a-0000-4000-8000-00000000000a/value", "nodes_number": "component://db5a000b-0000-4000-8000-00000000000b/value", "sync_replica_number": "component://db5a000c-0000-4000-8000-00000000000c/value"}'
+        next_url: ""
+        on_success:
+          - kind: close_window
+            window_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+          - kind: reload_data_source
+            data_source_uuid: $exordos_ecosystem.ui.components.$pg_instances_source:uuid
+          - kind: open_window
+            window_uuid: $exordos_ecosystem.ui.components.$pg_updated_window:uuid
+            context:
+              updated:
+                kind: submit_response
+        translations: []
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_edit_cpu:
+      uuid: "db5a0008-0000-4000-8000-000000000008"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-edit-cpu"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "CPU, ядер"
+        placeholder: ""
+        value: "context://cpu"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "CPU cores"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_edit_ram:
+      uuid: "db5a0009-0000-4000-8000-000000000009"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-edit-ram"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "RAM, МБ"
+        placeholder: ""
+        value: "context://ram"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "RAM, MB"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_edit_disk:
+      uuid: "db5a000a-0000-4000-8000-00000000000a"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-edit-disk"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Диск, ГБ"
+        placeholder: ""
+        value: "context://disk_size"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Disk, GB"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_edit_nodes:
+      uuid: "db5a000b-0000-4000-8000-00000000000b"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-edit-nodes"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 3
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Ноды"
+        placeholder: ""
+        value: "context://nodes_number"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Nodes"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_edit_sync:
+      uuid: "db5a000c-0000-4000-8000-00000000000c"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-edit-sync"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 4
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Синхронные реплики"
+        placeholder: ""
+        value: "context://sync_replica_number"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Synchronous replicas"
+
+    pg_edit_submit:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: button
+        name: "pg-edit-submit"
+        description: ""
+        width: 160
+        height: 32
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 5
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_edit_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Сохранить"
+        background_color: "var(--ui-accent)"
+        text_color: "var(--ui-accent-fg)"
+        action:
+          kind: submit
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: label
+            value: "Save"
+
+    pg_users_rule:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: line
+        name: "pg-users-rule"
+        description: ""
+        width: 720
+        height: 8
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 5
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.user.read"
+        x1: 0
+        y1: 4
+        x2: 720
+        y2: 4
+        thickness: 1
+        color: "var(--ui-border)"
+        line_style: solid
+        translations: []
+
+    pg_users_panel:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: panel
+        name: "pg-users-panel"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 12
+        padding_right: 12
+        padding_bottom: 12
+        padding_left: 12
+        position: 6
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.user.read"
+        background_color: "var(--ui-surface)"
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 8
+        action:
+          kind: dummy
+        translations: []
+
+    pg_users_heading:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-users-heading"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_users_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Пользователи"
+        font_size: 16
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Users"
+
+    # `{uuid}` is filled from the record the window was opened on,
+    # so the source lists the users of that instance alone. The
+    # database form below offers them as owners.
+    pg_users_source:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: data_source
+        name: "pg-users-source"
+        description: "Пользователи инстанса"
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_users_panel:uuid
+        url: "/api/dbaas/v1/types/postgres/instances/{uuid}/users/"
+        method: GET
+        refresh_method:
+          kind: periodic
+          seconds: 5
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    pg_users_table:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: table
+        name: "pg-users-table"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_users_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        data_source_uuid: $exordos_ecosystem.ui.components.$pg_users_source:uuid
+        columns:
+          - path: "name"
+            header: "Имя"
+          - path: "status"
+            header: "Статус"
+            format: status
+          - path: "created_at"
+            header: "Создан"
+        background_color: ""
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 8
+        page_size: 0
+        grid_lines: both
+        row_actions:
+          - kind: request
+            label: "Удалить"
+            method: DELETE
+            url: "/api/dbaas/v1/types/postgres/instances/{datasource://db5a0001-0000-4000-8000-000000000001/uuid}/users/{uuid}"
+            confirm: "Удалить пользователя «{name}»?"
+          - kind: copy
+            label: "Коп. UUID"
+            path: "uuid"
+        translations:
+          - locale: en
+            field: columns.0.header
+            value: "Name"
+          - locale: en
+            field: columns.1.header
+            value: "Status"
+          - locale: en
+            field: columns.2.header
+            value: "Created"
+          - locale: en
+            field: row_actions.0.label
+            value: "Delete"
+          - locale: en
+            field: row_actions.0.confirm
+            value: "Delete the user «{name}»?"
+          - locale: en
+            field: row_actions.1.label
+            value: "Copy UUID"
+
+    pg_user_create:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-user-create"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_users_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.user.create"
+        translations: []
+
+    pg_user_create_heading:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-user-create-heading"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_user_create:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Новый пользователь"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "New user"
+
+    # The project of a user is the project of its instance, so the
+    # body names none.
+    pg_user_create_form:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: form
+        name: "pg-user-create-form"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_user_create:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        url: "/api/dbaas/v1/types/postgres/instances/{uuid}/users/"
+        method: POST
+        body_format: json
+        body: '{"name": "component://db5a000d-0000-4000-8000-00000000000d/value", "password": "component://db5a000e-0000-4000-8000-00000000000e/value"}'
+        next_url: ""
+        on_success:
+          - kind: reload_data_source
+            data_source_uuid: $exordos_ecosystem.ui.components.$pg_users_source:uuid
+        translations: []
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_user_create_name:
+      uuid: "db5a000d-0000-4000-8000-00000000000d"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-user-create-name"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_user_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Имя"
+        placeholder: ""
+        value: ""
+        input_type: text
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Name"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_user_create_password:
+      uuid: "db5a000e-0000-4000-8000-00000000000e"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: password
+        name: "pg-user-create-password"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_user_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Пароль, от 8 символов"
+        placeholder: ""
+        value: ""
+        translations:
+          - locale: en
+            field: label
+            value: "Password, 8 characters or more"
+
+    pg_user_create_submit:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: button
+        name: "pg-user-create-submit"
+        description: ""
+        width: 160
+        height: 32
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_user_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Создать"
+        background_color: "var(--ui-accent)"
+        text_color: "var(--ui-accent-fg)"
+        action:
+          kind: submit
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: label
+            value: "Create"
+
+    pg_databases_rule:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: line
+        name: "pg-databases-rule"
+        description: ""
+        width: 720
+        height: 8
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 7
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.database.read"
+        x1: 0
+        y1: 4
+        x2: 720
+        y2: 4
+        thickness: 1
+        color: "var(--ui-border)"
+        line_style: solid
+        translations: []
+
+    pg_databases_panel:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: panel
+        name: "pg-databases-panel"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 12
+        padding_right: 12
+        padding_bottom: 12
+        padding_left: 12
+        position: 8
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_instance_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.database.read"
+        background_color: "var(--ui-surface)"
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 8
+        action:
+          kind: dummy
+        translations: []
+
+    pg_databases_heading:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-databases-heading"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_databases_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Базы данных"
+        font_size: 16
+        text_color: "var(--ui-text)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "Databases"
+
+    pg_databases_source:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: data_source
+        name: "pg-databases-source"
+        description: "Базы данных инстанса"
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_databases_panel:uuid
+        url: "/api/dbaas/v1/types/postgres/instances/{uuid}/databases/"
+        method: GET
+        refresh_method:
+          kind: periodic
+          seconds: 5
+        conditional_visibility:
+          kind: always
+        translations: []
+
+    # The owner is a uri of a user rather than its name, so the
+    # table leaves it out.
+    pg_databases_table:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: table
+        name: "pg-databases-table"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_databases_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        data_source_uuid: $exordos_ecosystem.ui.components.$pg_databases_source:uuid
+        columns:
+          - path: "name"
+            header: "Имя"
+          - path: "status"
+            header: "Статус"
+            format: status
+          - path: "created_at"
+            header: "Создана"
+        background_color: ""
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 8
+        page_size: 0
+        grid_lines: both
+        row_actions:
+          - kind: request
+            label: "Удалить"
+            method: DELETE
+            url: "/api/dbaas/v1/types/postgres/instances/{datasource://db5a0001-0000-4000-8000-000000000001/uuid}/databases/{uuid}"
+            confirm: "Удалить базу данных «{name}»?"
+          - kind: copy
+            label: "Коп. UUID"
+            path: "uuid"
+        translations:
+          - locale: en
+            field: columns.0.header
+            value: "Name"
+          - locale: en
+            field: columns.1.header
+            value: "Status"
+          - locale: en
+            field: columns.2.header
+            value: "Created"
+          - locale: en
+            field: row_actions.0.label
+            value: "Delete"
+          - locale: en
+            field: row_actions.0.confirm
+            value: "Delete the database «{name}»?"
+          - locale: en
+            field: row_actions.1.label
+            value: "Copy UUID"
+
+    pg_database_create:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: view
+        name: "pg-database-create"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_databases_panel:uuid
+        css: ""
+        conditional_visibility:
+          kind: permission
+          permission: "exordos_db.database.create"
+        translations: []
+
+    pg_database_create_heading:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-database-create-heading"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_database_create:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "Новая база данных"
+        font_size: 13
+        text_color: "var(--ui-text-muted)"
+        text_align: left
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations:
+          - locale: en
+            field: value
+            value: "New database"
+
+    # The owner is named by the uri of the user, which the platform
+    # expects, while the dropdown holds the uuid alone: the body puts
+    # the two together.
+    pg_database_create_form:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: form
+        name: "pg-database-create-form"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: column
+        gap: 8
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_database_create:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        url: "/api/dbaas/v1/types/postgres/instances/{uuid}/databases/"
+        method: POST
+        body_format: json
+        body: '{"name": "component://db5a000f-0000-4000-8000-00000000000f/value", "owner": "/v1/types/postgres/instances/{context://uuid}/users/{component://db5a0010-0000-4000-8000-000000000010/value}"}'
+        next_url: ""
+        on_success:
+          - kind: reload_data_source
+            data_source_uuid: $exordos_ecosystem.ui.components.$pg_databases_source:uuid
+        translations: []
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_database_create_name:
+      uuid: "db5a000f-0000-4000-8000-00000000000f"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-database-create-name"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_database_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Имя"
+        placeholder: ""
+        value: ""
+        input_type: text
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Name"
+
+    # Pinned uuid: the form body above references this field by
+    # uuid. Every user of the instance becomes one option, and the
+    # field holds its uuid.
+    pg_database_create_owner:
+      uuid: "db5a0010-0000-4000-8000-000000000010"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: select
+        name: "pg-database-create-owner"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_database_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Владелец"
+        placeholder: "Владелец"
+        value: ""
+        options: []
+        data_source_uuid: $exordos_ecosystem.ui.components.$pg_users_source:uuid
+        value_path: "uuid"
+        label_path: "name"
+        chevron_only: false
+        required: true
+        action:
+          kind: dummy
+        option_columns: []
+        translations:
+          - locale: en
+            field: placeholder
+            value: "Owner"
+          - locale: en
+            field: label
+            value: "Owner"
+
+    pg_database_create_submit:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: button
+        name: "pg-database-create-submit"
+        description: ""
+        width: 160
+        height: 32
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_database_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Создать"
+        background_color: "var(--ui-accent)"
+        text_color: "var(--ui-accent-fg)"
+        action:
+          kind: submit
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: label
+            value: "Create"
+
+    pg_create_window:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: window
+        name: "pg-create-window"
+        description: ""
+        width: 440
+        height: 520
+        stretch: true
+        padding_top: 16
+        padding_right: 16
+        padding_bottom: 16
+        padding_left: 16
+        position: 5
+        direction: column
+        gap: 12
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        background_color: "var(--ui-surface)"
+        border_color: "var(--ui-border)"
+        border_width: 1
+        border_radius: 12
+        action:
+          kind: dummy
+        title: "Новый инстанс PostgreSQL"
+        left: 200
+        top: 140
+        placement: free
+        auto_close_ms: 0
+        translations:
+          - locale: en
+            field: title
+            value: "New PostgreSQL instance"
+
+    # The version is named by its uri, which the platform expects,
+    # while the dropdown holds the uuid alone: the body puts the two
+    # together. The project of the instance is the one the account
+    # is signed in with, so the body names none.
+    pg_create_form:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: form
+        name: "pg-create-form"
+        description: ""
+        width: null
+        height: null
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: column
+        gap: 12
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        url: "/api/dbaas/v1/types/postgres/instances/"
+        method: POST
+        body_format: json
+        body: '{"name": "component://db5a0002-0000-4000-8000-000000000002/value", "version": "/v1/types/postgres/versions/{component://db5a0003-0000-4000-8000-000000000003/value}", "cpu": "component://db5a0004-0000-4000-8000-000000000004/value", "ram": "component://db5a0005-0000-4000-8000-000000000005/value", "disk_size": "component://db5a0006-0000-4000-8000-000000000006/value", "nodes_number": "component://db5a0007-0000-4000-8000-000000000007/value"}'
+        next_url: ""
+        on_success:
+          - kind: close_window
+            window_uuid: $exordos_ecosystem.ui.components.$pg_create_window:uuid
+          - kind: reload_data_source
+            data_source_uuid: $exordos_ecosystem.ui.components.$pg_instances_source:uuid
+          - kind: open_window
+            window_uuid: $exordos_ecosystem.ui.components.$pg_created_window:uuid
+            context:
+              created:
+                kind: submit_response
+        translations: []
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_create_name:
+      uuid: "db5a0002-0000-4000-8000-000000000002"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-create-name"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Название"
+        placeholder: ""
+        value: ""
+        input_type: text
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Name"
+
+    # Pinned uuid: the form body above references this field by
+    # uuid. Every version the platform offers becomes one option, and
+    # the field holds its uuid.
+    pg_create_version:
+      uuid: "db5a0003-0000-4000-8000-000000000003"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: select
+        name: "pg-create-version"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 1
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Версия PostgreSQL"
+        placeholder: "Версия"
+        value: ""
+        options: []
+        data_source_uuid: $exordos_ecosystem.ui.components.$pg_versions_source:uuid
+        value_path: "uuid"
+        label_path: "name"
+        chevron_only: false
+        required: true
+        action:
+          kind: dummy
+        option_columns: []
+        translations:
+          - locale: en
+            field: placeholder
+            value: "Version"
+          - locale: en
+            field: label
+            value: "PostgreSQL version"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    # A field the platform validates as a number reads back as one, so
+    # the body carries it as a number rather than as its text.
+    pg_create_cpu:
+      uuid: "db5a0004-0000-4000-8000-000000000004"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-create-cpu"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 2
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "CPU, ядер"
+        placeholder: ""
+        value: "1"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "CPU cores"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_create_ram:
+      uuid: "db5a0005-0000-4000-8000-000000000005"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-create-ram"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 3
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "RAM, МБ"
+        placeholder: ""
+        value: "2048"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "RAM, MB"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_create_disk:
+      uuid: "db5a0006-0000-4000-8000-000000000006"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-create-disk"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 4
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Диск, ГБ"
+        placeholder: ""
+        value: "10"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Disk, GB"
+
+    # Pinned uuid: the form body above references this field by uuid.
+    pg_create_nodes:
+      uuid: "db5a0007-0000-4000-8000-000000000007"
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: input
+        name: "pg-create-nodes"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 5
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Ноды"
+        placeholder: ""
+        value: "1"
+        input_type: number
+        read_only: false
+        required: true
+        input_icon: null
+        translations:
+          - locale: en
+            field: label
+            value: "Nodes"
+
+    pg_create_submit:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: button
+        name: "pg-create-submit"
+        description: ""
+        width: null
+        height: 32
+        stretch: true
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 6
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_create_form:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        label: "Создать"
+        background_color: "var(--ui-accent)"
+        text_color: "var(--ui-accent-fg)"
+        action:
+          kind: submit
+        border_radius_top_left: null
+        border_radius_top_right: null
+        border_radius_bottom_right: null
+        border_radius_bottom_left: null
+        translations:
+          - locale: en
+            field: label
+            value: "Create"
+
+    # `submit_response` is replaced by the body the platform answered
+    # with, so the message names the instance just ordered.
+    pg_created_window:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: window
+        name: "pg-created-window"
+        description: ""
+        width: 360
+        height: 96
+        stretch: true
+        padding_top: 16
+        padding_right: 16
+        padding_bottom: 16
+        padding_left: 16
+        position: 6
+        direction: column
+        gap: 12
+        justify_content: center
+        align_items: center
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        background_color: "var(--ui-success-bg)"
+        border_color: "var(--ui-success-border)"
+        border_width: 1
+        border_radius: 12
+        action:
+          kind: dummy
+        title: "Инстанс создан"
+        left: 200
+        top: 140
+        placement: top_right
+        auto_close_ms: 4000
+        translations:
+          - locale: en
+            field: title
+            value: "Instance created"
+
+    pg_created_window_message:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-created-window-message"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_created_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "context://created/name"
+        font_size: 14
+        text_color: "var(--ui-text)"
+        text_align: center
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+    pg_updated_window:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: window
+        name: "pg-updated-window"
+        description: ""
+        width: 360
+        height: 96
+        stretch: true
+        padding_top: 16
+        padding_right: 16
+        padding_bottom: 16
+        padding_left: 16
+        position: 7
+        direction: column
+        gap: 12
+        justify_content: center
+        align_items: center
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        background_color: "var(--ui-success-bg)"
+        border_color: "var(--ui-success-border)"
+        border_width: 1
+        border_radius: 12
+        action:
+          kind: dummy
+        title: "Инстанс изменён"
+        left: 200
+        top: 140
+        placement: top_right
+        auto_close_ms: 4000
+        translations:
+          - locale: en
+            field: title
+            value: "Instance updated"
+
+    pg_updated_window_message:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: label
+        name: "pg-updated-window-message"
+        description: ""
+        width: null
+        height: null
+        stretch: false
+        padding_top: 0
+        padding_right: 0
+        padding_bottom: 0
+        padding_left: 0
+        position: 0
+        direction: row
+        gap: 0
+        justify_content: flex-start
+        align_items: stretch
+        parent_uuid: $exordos_ecosystem.ui.components.$pg_updated_window:uuid
+        css: ""
+        conditional_visibility:
+          kind: always
+        value: "context://updated/name"
+        font_size: 14
+        text_color: "var(--ui-text)"
+        text_align: center
+        link: ""
+        open_in_new_tab: false
+        scrollable: false
+        copyable: false
+        expandable: false
+        format: "date"
+        translations: []
+
+  $exordos_ecosystem.ui.sidebar_items:
+
+    pg_item:
+      project_id: $dbaas_ui.imports.$eco_project:uuid
+      props:
+        kind: sidebar_item
+        name: "Базы данных"
+        description: "Инстансы PostgreSQL"
+        group: "Инфраструктура"
+        position: 13
+        component_uuid: $exordos_ecosystem.ui.components.$pg_page:uuid
+        icon: component
+        permissions:
+          - permission: "exordos_db.pg_instance.read"
+        public_path: ""
+        translations:
+          - locale: en
+            field: name
+            value: "Databases"
+          - locale: en
+            field: description
+            value: "PostgreSQL instances"
+          - locale: en
+            field: group
+            value: "Infrastructure"
