@@ -5,6 +5,8 @@ connection_url = postgresql://{{ GC_PG_USER }}:{{ GC_PG_PASS }}@localhost:5432/{
 config = logging.yaml
 
 [iam]
+# The client that issues the tokens: its keys verify them
+iam_endpoint = http://core.local.genesis-core.tech:80/api/core/v1/iam/clients/{{ IAM_CLIENT_UUID }}
 # token_encryption_algorithm = HS256
 hs256_jwks_decryption_key = {{ GC_HS256_JWKS_ENCRYPTION_KEY }}
 audience = {{ AUDIENCE }}
