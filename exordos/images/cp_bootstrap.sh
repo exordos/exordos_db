@@ -84,6 +84,16 @@ if [[ ! -f $SERVICE_CONFIG ]]; then
     try_generate_config $CORE_AGENT_CONFIG
 fi
 
+# The config of the core agent names the resource types it serves, so it
+# follows the image rather than the persistent disk it is kept on: rendered
+# anew from the template of the image, keeping the database of the node
+DB_URL=$(grep -m1 '^connection_url *=' "$CORE_AGENT_CONFIG")
+sudo cp "$GC_PATH/etc/exordos_db/core_agent.conf.j2" "${CORE_AGENT_CONFIG}.j2"
+j2 "${CORE_AGENT_CONFIG}.j2" \
+    | DB_URL="$DB_URL" awk '/^connection_url *=/ {print ENVIRON["DB_URL"]; next} {print}' \
+    | sudo tee "${CORE_AGENT_CONFIG}.new" > /dev/null
+sudo mv "${CORE_AGENT_CONFIG}.new" "$CORE_AGENT_CONFIG"
+
 # The config is kept on the persistent disk, so one written before the IAM
 # client was configurable verifies tokens with the keys of the wrong client
 IAM_ENDPOINT="http://core.local.genesis-core.tech:80/api/core/v1/iam/clients/${IAM_CLIENT_UUID}"

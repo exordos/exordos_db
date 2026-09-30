@@ -90,8 +90,6 @@ class PGInstance(
     )
     # TODO: support version update
     version = relationships.relationship(PGVersion, required=True, read_only=True)
-    # Continuous WAL archiving and periodic backups, disabled when None
-    backup = properties.property(backups.BACKUP_TYPE, default=None)
     # Bootstrap the cluster from a backup instead of an empty database
     restore_from = properties.property(
         backups.RESTORE_SOURCE_TYPE, default=None, read_only=True
@@ -103,9 +101,6 @@ class PGInstance(
     # {"phase": ..., "error": ...} of the restore of a new instance as its
     # nodes report it, None when there is none in progress
     restore_status = properties.property(types.AllowNone(types.Dict()), default=None)
-    # {"error": ...} of the backups as the primary reports it, None while
-    # backups are off or before the primary has reported
-    backup_status = properties.property(types.AllowNone(types.Dict()), default=None)
 
     def restore_failed(self) -> bool:
         return self.restore_status is not None and bool(self.restore_status["error"])
@@ -120,6 +115,12 @@ class PGInstance(
             session=session, filters={"instance": dm_filters.EQ(self)}
         )
 
+    def get_backup_policy(self, session=None):
+        # One per instance for now, see PGBackupPolicy
+        return PGBackupPolicy.objects.get_one_or_none(
+            session=session, filters={"instance": dm_filters.EQ(self)}
+        )
+
     def _validate_update(self, session=None):
         disk_size = self.properties["disk_size"]
         if disk_size.is_dirty() and disk_size.old_value > self.disk_size:
@@ -130,6 +131,7 @@ class PGInstance(
         super().update(session=session, force=force)
 
     def delete(self, session=None, **kwargs):
+        u.remove_nested_dm(PGBackupPolicy, "instance", self, session=session)
         u.remove_nested_dm(PGDatabase, "instance", self, session=session)
         u.remove_nested_dm(PGUser, "instance", self, session=session)
         return super().delete(session=session, **kwargs)
@@ -204,6 +206,47 @@ class PGDatabase(InstanceChildModel):
         default=PGStatus.ACTIVE.value,
     )
     owner = relationships.relationship(PGUser, required=True)
+
+
+class PGBackupPolicy(InstanceChildModel):
+    """Continuous WAL archiving and periodic backups of the instance.
+
+    A resource of its own rather than a field of the instance, so that
+    backups can be turned on by other than the owner of the instance, e.g.
+    by an element next to the one that created it. There is one policy per
+    instance for now, it goes to the first pgBackRest repository.
+    """
+
+    __tablename__ = "postgres_backup_policies"
+
+    storage = properties.property(backups.STORAGE_TYPE, required=True)
+    full_interval_hours = properties.property(
+        types.Integer(min_value=1, max_value=8784),
+        default=168,
+    )
+    incr_interval_hours = properties.property(
+        types.Integer(min_value=1, max_value=8784),
+        default=24,
+    )
+    retention_full = properties.property(
+        types.Integer(min_value=1, max_value=365),
+        default=2,
+    )
+    # As the primary reports it: NEW until it has, then ACTIVE or ERROR
+    status = properties.property(
+        types.Enum([status.value for status in PGStatus]),
+        default=PGStatus.NEW.value,
+    )
+    # Why the last attempt to use the storage failed
+    error = properties.property(
+        types.AllowNone(types.String(max_length=2048)), default=None
+    )
+
+    def pgbackrest_repo_options(self) -> dict[str, str]:
+        return {
+            **self.storage.storage_repo_options(),
+            "repo1-retention-full": str(self.retention_full),
+        }
 
 
 # class PGDatabasePrivilege(str, enum.Enum):

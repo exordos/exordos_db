@@ -26,6 +26,7 @@ import yaml
 from exordos_db.common import pgbackrest
 from exordos_db.infra.services import builder as infra_builder
 from exordos_db.paas.dm import models as paas_models
+from exordos_db.paas.services import builder as paas_builder
 from exordos_db.user_api.dm import backups
 from exordos_db.user_api.dm import models
 
@@ -40,8 +41,26 @@ S3_VIEW = {
 }
 
 
-def _s3(**kwargs):
-    return backups.BACKUP_TYPE.from_simple_type({**S3_VIEW, **kwargs})
+def _storage(**kwargs):
+    return backups.STORAGE_TYPE.from_simple_type({**S3_VIEW, **kwargs})
+
+
+def _policy(**kwargs):
+    instance = models.PGInstance(
+        project_id=uuid.uuid4(),
+        name="backed-up",
+        cpu=1,
+        ram=1024,
+        disk_size=8,
+        nodes_number=1,
+        version=models.PGVersion(name="18", image="pg.raw"),
+    )
+    return models.PGBackupPolicy(
+        project_id=instance.project_id,
+        instance=instance,
+        storage=_storage(),
+        **kwargs,
+    )
 
 
 def _spec(**options):
@@ -62,11 +81,11 @@ def _backup(backup_type, stop, error=False):
     }
 
 
-class TestS3Backup:
+class TestBackupPolicy:
     def test_defaults(self):
-        backup = _s3()
+        policy = _policy()
 
-        assert backup.pgbackrest_repo_options() == {
+        assert policy.pgbackrest_repo_options() == {
             "repo1-type": "s3",
             "repo1-s3-endpoint": "http://10.20.0.30:9000",
             "repo1-s3-bucket": "dbaas-backups",
@@ -78,27 +97,70 @@ class TestS3Backup:
             "repo1-path": "/exordos_db",
             "repo1-retention-full": "2",
         }
-        assert backup.full_interval_hours == 168
-        assert backup.incr_interval_hours == 24
+        assert policy.full_interval_hours == 168
+        assert policy.incr_interval_hours == 24
+        assert policy.status == "NEW"
+        assert policy.error is None
 
+    def test_retention(self):
+        options = _policy(retention_full=7).pgbackrest_repo_options()
+        assert options["repo1-retention-full"] == "7"
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("full_interval_hours", 0),
+            ("incr_interval_hours", 8785),
+            ("retention_full", 0),
+        ],
+    )
+    def test_invalid_schedule(self, field, value):
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            _policy(**{field: value})
+
+    def test_spec_of_the_instance(self, monkeypatch):
+        policy = _policy(full_interval_hours=48, incr_interval_hours=6)
+        instance = policy.instance
+        get_policy = lambda: policy
+        monkeypatch.setattr(instance, "get_backup_policy", get_policy, raising=False)
+
+        spec = paas_builder.PGInstanceBuilder._get_backup(None, instance)
+
+        assert spec["stanza"] == str(instance.uuid)
+        assert spec["schedule"] == {"full_interval_hours": 48, "incr_interval_hours": 6}
+        assert spec["options"]["repo1-s3-bucket"] == "dbaas-backups"
+        # A quarter of the 8 GiB data disk
+        assert spec["options"]["archive-push-queue-max"] == "2GiB"
+
+    def test_no_policy_no_backups(self, monkeypatch):
+        instance = _policy().instance
+        get_policy = lambda: None
+        monkeypatch.setattr(instance, "get_backup_policy", get_policy, raising=False)
+
+        assert paas_builder.PGInstanceBuilder._get_backup(None, instance) is None
+
+
+class TestS3Storage:
     def test_encryption_and_trailing_slash(self):
-        options = _s3(
+        options = _storage(
             endpoint="https://s3.example.com/",
             encryption_key="k3y",
             verify_tls=False,
-        ).pgbackrest_repo_options()
+        ).storage_repo_options()
 
         assert options["repo1-s3-endpoint"] == "https://s3.example.com"
         assert options["repo1-storage-verify-tls"] == "n"
         assert options["repo1-cipher-type"] == "aes-256-cbc"
         assert options["repo1-cipher-pass"] == "k3y"
 
-    def test_none_disables(self):
-        assert backups.BACKUP_TYPE.from_simple_type(None) is None
-
     def test_roundtrip(self):
-        view = backups.BACKUP_TYPE.to_simple_type(_s3())
-        assert backups.BACKUP_TYPE.from_simple_type(view) == _s3()
+        view = backups.STORAGE_TYPE.to_simple_type(_storage())
+        assert backups.STORAGE_TYPE.from_simple_type(view) == _storage()
+
+    def test_schedule_is_not_accepted(self):
+        # It's a matter of the policy
+        with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
+            _storage(retention_full=2)
 
     @pytest.mark.parametrize(
         "field, value",
@@ -114,13 +176,13 @@ class TestS3Backup:
     )
     def test_invalid(self, field, value):
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
-            _s3(**{field: value})
+            _storage(**{field: value})
 
     @pytest.mark.parametrize("field", ["endpoint", "bucket", "access_key"])
     def test_required(self, field):
         view = {k: v for k, v in S3_VIEW.items() if k != field}
         with pytest.raises((ra_exc.ParseError, ValueError, TypeError)):
-            backups.BACKUP_TYPE.from_simple_type(view)
+            backups.STORAGE_TYPE.from_simple_type(view)
 
 
 class TestConfig:

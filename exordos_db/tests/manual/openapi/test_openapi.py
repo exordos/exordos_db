@@ -1,4 +1,4 @@
-#    Copyright 2025 Genesis Corporation.
+#    Copyright 2026 Genesis Corporation.
 #
 #    All Rights Reserved.
 #
@@ -14,52 +14,35 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+"""The generated documents are what the running services serve.
+
+`exordos_db.common.openapi` builds them without a service, standing in for
+the request state the services have. This asks running services for theirs
+and compares, which is what keeps those stand-ins honest.
+
+DBAAS_HOST points at a control plane node (default 10.20.0.20).
+"""
+
 import os
 
+import pytest
 import requests
-import ruamel.yaml
 
-from exordos_db.common.utils import PROJECT_PATH
+from exordos_db.common import openapi
 
-SPECIFICATIONS_PATH = "specifications/3.0.3"
-yaml = ruamel.yaml.YAML()
-yaml.indent(sequence=4, offset=2)
+HOST = os.environ.get("DBAAS_HOST", "10.20.0.20")
 
 
-class TestGetOpenApiSpecs:
-    def test_user_openapi_base(self):
-        # User API
-        user_base_url = "http://10.20.0.20:8080"
-        url = f"{user_base_url}/{SPECIFICATIONS_PATH}"
-        response = requests.get(url)
-        assert response.status_code == 200
+@pytest.mark.parametrize("api", openapi.APIS, ids=lambda api: api.name)
+def test_generated_document_is_the_served_one(api):
+    url = f"http://{HOST}:{api.port}/specifications/{openapi.OPENAPI_VERSION}"
+    response = requests.get(url, timeout=30)
+    assert response.status_code == 200, response.text
+    served = response.json()
 
-        path = os.path.join(PROJECT_PATH, "docs", "openapi", "openapi_user.yaml")
-        spec = response.json()
-        spec["info"]["version"] = "latest"
-        with open(path, "w") as f:
-            yaml.dump(spec, f)
+    generated = openapi.build(api)
 
-        # Orch API
-        orch_base_url = "http://10.20.0.20:11011"
-        url = f"{orch_base_url}/{SPECIFICATIONS_PATH}"
-        response = requests.get(url)
-        assert response.status_code == 200
-
-        path = os.path.join(PROJECT_PATH, "docs", "openapi", "openapi_orch.yaml")
-        spec = response.json()
-        spec["info"]["version"] = "latest"
-        with open(path, "w") as f:
-            yaml.dump(spec, f)
-
-        # Status API
-        status_base_url = "http://10.20.0.20:11012"
-        url = f"{status_base_url}/{SPECIFICATIONS_PATH}"
-        response = requests.get(url)
-        assert response.status_code == 200
-
-        path = os.path.join(PROJECT_PATH, "docs", "openapi", "openapi_status.yaml")
-        spec = response.json()
-        spec["info"]["version"] = "latest"
-        with open(path, "w") as f:
-            yaml.dump(spec, f)
+    # The only parts describing the request rather than the API
+    served["servers"] = generated["servers"]
+    served["info"]["version"] = generated["info"]["version"]
+    assert served == generated

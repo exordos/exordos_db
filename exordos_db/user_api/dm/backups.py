@@ -46,6 +46,8 @@ class RepoPathType(types.BaseCompiledRegExpTypeFromAttr):
 class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
     """A pgBackRest repository in S3."""
 
+    KIND = "s3"
+
     endpoint = properties.property(HttpEndpointType(), required=True)
     bucket = properties.property(BucketNameType(), required=True)
     region = properties.property(OptionValueType(), default="us-east-1")
@@ -80,29 +82,6 @@ class S3Storage(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
         return options
 
 
-class S3Backup(S3Storage):
-    KIND = "s3"
-
-    full_interval_hours = properties.property(
-        types.Integer(min_value=1, max_value=8784),
-        default=168,
-    )
-    incr_interval_hours = properties.property(
-        types.Integer(min_value=1, max_value=8784),
-        default=24,
-    )
-    retention_full = properties.property(
-        types.Integer(min_value=1, max_value=365),
-        default=2,
-    )
-
-    def pgbackrest_repo_options(self) -> dict[str, str]:
-        return {
-            **self.storage_repo_options(),
-            "repo1-retention-full": str(self.retention_full),
-        }
-
-
 class RestoreLatest(types_dynamic.AbstractKindModel, models.SimpleViewMixin):
     """Replay the whole archive, i.e. recover to the end of it."""
 
@@ -130,8 +109,6 @@ RESTORE_TARGET_TYPE = types_dynamic.KindModelSelectorType(
 
 
 class S3RestoreSource(S3Storage):
-    KIND = "s3"
-
     # Stanza of the backed up instance, i.e. its uuid. The instance itself
     # may be gone already.
     stanza = properties.property(types.UUID(), required=True)
@@ -151,10 +128,8 @@ class S3RestoreSource(S3Storage):
         }
 
 
-BACKUP_TYPE = types.AllowNone(
-    types_dynamic.KindModelSelectorType(
-        types_dynamic.KindModelType(S3Backup),
-    )
+STORAGE_TYPE = types_dynamic.KindModelSelectorType(
+    types_dynamic.KindModelType(S3Storage),
 )
 
 RESTORE_SOURCE_TYPE = types.AllowNone(
