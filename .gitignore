@@ -128,6 +128,8 @@ venv.bak/
 
 # Documentation
 docs/build
+# Written by `exordos-db-openapi-spec`, see exordos_db/common/openapi.py
+docs/openapi/*.yaml
 docs/source/*.png
 
 # Vagrant

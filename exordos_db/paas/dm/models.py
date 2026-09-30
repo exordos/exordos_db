@@ -121,7 +121,6 @@ class PGInstance(
                 "name",
                 "sync_replica_number",
                 "disk_size",
-                "backup",
                 "roles_imported",
             )
         )

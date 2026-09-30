@@ -329,6 +329,22 @@ class Cluster:
             "uuid"
         ]
 
+    def create_backup_policy(self, storage: dict, **fields) -> str:
+        body = {
+            "name": "backups",
+            "project_id": PROJECT_ID,
+            "instance": self.path,
+            "storage": storage,
+            **fields,
+        }
+        return self.api.call("POST", f"{self.path}/backup_policies/", body, 201).json()[
+            "uuid"
+        ]
+
+    def backup_policy(self) -> dict | None:
+        policies = self.api.get(f"{self.path}/backup_policies/")
+        return policies[0] if policies else None
+
 
 @pytest.fixture(scope="session")
 def api() -> Api:
@@ -341,7 +357,7 @@ def pg_version(api: Api) -> str:
 
 
 def s3_storage(**fields) -> dict:
-    """The storage fields of backup and restore_from in the bucket."""
+    """The storage of a backup policy, the fields of restore_from."""
     return {
         "kind": "s3",
         "endpoint": S3_ENDPOINT,

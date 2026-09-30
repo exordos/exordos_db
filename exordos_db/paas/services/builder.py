@@ -73,12 +73,10 @@ def restore_status(
 
 
 def backup_status(
-    instance: models.PGInstance,
+    policy: user_models.PGBackupPolicy,
     actuals: tp.Iterable[models.PGInstanceNode | None],
-) -> dict[str, tp.Any] | None:
+) -> tuple[str, str | None]:
     """Take what the primary reports about the backups."""
-    if instance.backup is None:
-        return None
     reports = [
         actual.backup_state
         for actual in actuals
@@ -86,11 +84,12 @@ def backup_status(
     ]
     if not reports:
         # No primary reports meanwhile, e.g. during a failover
-        return instance.backup_status
+        return policy.status, policy.error
     # A former primary whose agent went down keeps its last report; the
     # current one is on the latest timeline
-    latest = max(reports, key=lambda r: r.get("timeline") or 0)
-    return {"error": latest["error"]}
+    error = max(reports, key=lambda r: r.get("timeline") or 0)["error"]
+    status = user_models.PGStatus.ERROR if error else user_models.PGStatus.ACTIVE
+    return status.value, error
 
 
 class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
@@ -113,10 +112,10 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         return {d.name: {"owner": d.owner.name} for d in instance.get_databases()}
 
     def _get_backup(self, instance: models.PGInstance) -> dict[str, tp.Any] | None:
-        if instance.backup is None:
+        if (policy := instance.get_backup_policy()) is None:
             return None
 
-        options = instance.backup.pgbackrest_repo_options()
+        options = policy.pgbackrest_repo_options()
         # WAL lives on the data disk. When the repository is unreachable
         # pgBackRest drops WAL past this size instead of filling the disk,
         # which breaks PITR but keeps the database running.
@@ -125,8 +124,8 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
             "stanza": str(instance.uuid),
             "options": options,
             "schedule": {
-                "full_interval_hours": instance.backup.full_interval_hours,
-                "incr_interval_hours": instance.backup.incr_interval_hours,
+                "full_interval_hours": policy.full_interval_hours,
+                "incr_interval_hours": policy.incr_interval_hours,
             },
         }
 
@@ -219,10 +218,13 @@ class PGInstanceBuilder(PaaSBuilder, oslo_base.OsloConfigurableService):
         instance: models.PGInstance,
         paas_collection: builder.PaaSCollection,
     ) -> None:
-        status = backup_status(instance, paas_collection.actuals())
-        if status != instance.backup_status:
-            instance.backup_status = status
-            instance.update(force=True)
+        if (policy := instance.get_backup_policy()) is None:
+            return
+        status, error = backup_status(policy, paas_collection.actuals())
+        if (status, error) != (policy.status, policy.error):
+            policy.status = status
+            policy.error = error
+            policy.update()
 
     def actualize_paas_objects_source_data_plane(
         self,

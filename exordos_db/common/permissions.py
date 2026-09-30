@@ -27,6 +27,10 @@ PERMS_OWNER = [
     "exordos_db.user.read",
     "exordos_db.user.update",
     "exordos_db.user.delete",
+    "exordos_db.backup_policy.create",
+    "exordos_db.backup_policy.read",
+    "exordos_db.backup_policy.update",
+    "exordos_db.backup_policy.delete",
     "exordos_db.pg_version.read",
 ]
 

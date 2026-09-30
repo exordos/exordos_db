@@ -37,7 +37,11 @@ build:
     # List of images in the element
     - manifest: manifests/dbaas.yaml.j2
       artifacts:
-      - path: ../docs/openapi/openapi_user.yaml
+      # Generated rather than committed, so it has to be written here
+      # before it can be published
+      - script: images/build_openapi_spec.sh
+        artifacts:
+          - ../docs/openapi/openapi_user.yaml
       - path: artifacts/icon.jpg
       - path: artifacts/preview-1.jpg
       - path: artifacts/preview-2.jpg
@@ -79,3 +83,6 @@ build:
     # grafanaaas plugin, so it needs no image or wheel of its own.
     - manifest: manifests/dbaas_dashboard.yaml.j2
     - manifest: manifests/communal_pg_cluster.yaml.j2
+    # Backups of the communal PG cluster, a separate element so that only the
+    # installations which want them need S3
+    - manifest: manifests/communal_pg_cluster_backup.yaml.j2

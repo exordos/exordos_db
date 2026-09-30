@@ -51,6 +51,14 @@ resources:
       name: "exordos_db.user.update"
     user_delete:
       name: "exordos_db.user.delete"
+    backup_policy_create:
+      name: "exordos_db.backup_policy.create"
+    backup_policy_read:
+      name: "exordos_db.backup_policy.read"
+    backup_policy_update:
+      name: "exordos_db.backup_policy.update"
+    backup_policy_delete:
+      name: "exordos_db.backup_policy.delete"
     pg_version_read:
       name: "exordos_db.pg_version.read"
 
@@ -102,6 +110,22 @@ resources:
     user_delete_binding:
       role: "726f6c65-0000-0000-0000-000000000002"
       permission: $core.iam.permissions.$user_delete:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_policy_create_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_policy_create:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_policy_read_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_policy_read:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_policy_update_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_policy_update:uuid
+      project_id: $core.iam.projects.$dbaas_project:uuid
+    backup_policy_delete_binding:
+      role: "726f6c65-0000-0000-0000-000000000002"
+      permission: $core.iam.permissions.$backup_policy_delete:uuid
       project_id: $core.iam.projects.$dbaas_project:uuid
     pg_version_read_binding:
       role: "726f6c65-0000-0000-0000-000000000002"

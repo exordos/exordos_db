@@ -11,7 +11,7 @@ requirements:
   core:
     from_version: "0.0.0"
   dbaas:
-    from_version: "2.5.0"
+    from_version: "2.7.0"
   s3aas:
     from_version: "0.0.0"
   communal_s3:
@@ -108,17 +108,25 @@ resources:
       ram: $example_pg_backup.imports.$var_default_ram:value
       disk_size: 20
       version: $example_pg_backup.imports.$pg18:uuid
-      backup:
+
+  # The policy may as well be in another element than the instance, see
+  # communal_pg_cluster_backup
+  $dbaas.types.postgres.instances.$example_pg.backup_policies:
+    backups:
+      name: "backups"
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      instance: $dbaas.types.postgres.instances.$example_pg:uuid
+      storage:
         kind: s3
         endpoint: f"http://{$example_pg_backup.imports.$communal_s3:join(ipsv4)}:9000"
         bucket: $s3aas.types.s3.instances.$communal_s3.buckets.$pg_backups:name
         access_key: $core.secret.passwords.$pg_backup_access_key:value
         secret_key: $core.secret.passwords.$pg_backup_secret_key:value
         encryption_key: $core.secret.passwords.$pg_backup_encryption_key:value
-        # A full backup a week, an incremental one a day, two weeks kept
-        full_interval_hours: 168
-        incr_interval_hours: 24
-        retention_full: 2
+      # A full backup a week, an incremental one a day, two weeks kept
+      full_interval_hours: 168
+      incr_interval_hours: 24
+      retention_full: 2
 
   $dbaas.types.postgres.instances.$example_pg.users:
     app:

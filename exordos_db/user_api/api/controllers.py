@@ -74,7 +74,6 @@ class PGInstanceController(
                 "ipsv4": {constants.ALL: field_p.Permissions.RO},
                 "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
                 "restore_status": {constants.ALL: field_p.Permissions.RO},
-                "backup_status": {constants.ALL: field_p.Permissions.RO},
             },
         ),
     )
@@ -92,6 +91,28 @@ class PGDatabaseController(
         model_class=models.PGDatabase,
         convert_underscore=False,
         process_filters=True,
+    )
+
+
+class PGBackupPolicyController(
+    iam_controllers.NestedPolicyBasedController,
+    ra_controllers.BaseNestedResourceControllerPaginated,
+):
+    __policy_service_name__ = "exordos_db"
+    __policy_name__ = "backup_policy"
+    __pr_name__ = "instance"
+
+    __resource__ = ra_resources.ResourceByRAModel(
+        model_class=models.PGBackupPolicy,
+        convert_underscore=False,
+        process_filters=True,
+        fields_permissions=field_p.FieldsPermissions(
+            default=field_p.Permissions.RW,
+            fields={
+                "status": {constants.ALL: field_p.Permissions.RO},
+                "error": {constants.ALL: field_p.Permissions.RO},
+            },
+        ),
     )
 
 

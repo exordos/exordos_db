@@ -74,14 +74,14 @@ def _append(cluster, note, count):
     )
 
 
-def _backup_status(cluster, error):
+def _backup_status(cluster, status):
     """Wait for the primary to report the storage usable or not."""
 
     def reported():
-        status = cluster.instance().get("backup_status")
-        return status is not None and bool(status.get("error")) == error and status
+        policy = cluster.backup_policy()
+        return policy is not None and policy["status"] == status and policy
 
-    return fc.wait_for(reported, f"backup_status of {cluster.uuid}, error={error}")
+    return fc.wait_for(reported, f"backup policy of {cluster.uuid} to be {status}")
 
 
 def test_backups_are_taken(scenario, instances):
@@ -89,14 +89,9 @@ def test_backups_are_taken(scenario, instances):
     # stanza is ready, which can be before the instance is ACTIVE
     before = fc.utc_now() - datetime.timedelta(minutes=1)
     scenario["before_backups"] = before.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    source = instances(
-        "pitr-src",
-        nodes=2,
-        backup={
-            **scenario["storage"],
-            "incr_interval_hours": 1,
-            "retention_full": 2,
-        },
+    source = instances("pitr-src", nodes=2)
+    source.create_backup_policy(
+        scenario["storage"], incr_interval_hours=1, retention_full=2
     )
     app = source.create_user("app_user", APP_PASSWORD)
     source.create_database("appdb", app)
@@ -111,8 +106,24 @@ def test_backups_are_taken(scenario, instances):
     backups = source.backups()
     assert [b["type"] for b in backups if not b.get("error")] == ["full"]
     assert source.sql("select failed_count from pg_stat_archiver") == "0"
-    assert _backup_status(source, error=False) == {"error": None}
+    # The API leaves out null fields
+    assert _backup_status(source, "ACTIVE").get("error") is None
     scenario["source"] = source
+
+
+def test_one_backup_policy_per_instance(scenario):
+    _require(scenario, "source")
+    source = scenario["source"]
+    body = {
+        "name": "second",
+        "project_id": fc.PROJECT_ID,
+        "instance": source.path,
+        "storage": scenario["storage"],
+    }
+
+    response = source.api.call("POST", f"{source.path}/backup_policies/", body)
+
+    assert response.status_code == 409, response.text
 
 
 def test_points_in_time(scenario):
@@ -176,7 +187,7 @@ def test_clone_at_a_target_time(scenario, clones):
     assert clone.can_login("old_user", OLD_PASSWORD, "olddb")
     assert clone.instance().get("restore_status") is None
     # A restored instance doesn't back up unless told to
-    assert clone.instance().get("backup") is None
+    assert clone.backup_policy() is None
 
 
 def test_clone_to_the_end_of_the_archive(scenario, clones):
@@ -237,7 +248,8 @@ def test_storage_errors_dont_hold_up_the_roles(scenario):
         "path": "/functional-broken",
     }
 
-    source.api.call("PUT", source.path, {"backup": broken}, expect=200)
+    policy = f"{source.path}/backup_policies/{source.backup_policy()['uuid']}"
+    source.api.call("PUT", policy, {"storage": broken}, expect=200)
     user = source.create_user("during_error", "during-error-pass-functional")
 
     fc.wait_for(
@@ -246,7 +258,7 @@ def test_storage_errors_dont_hold_up_the_roles(scenario):
         ),
         "the user to be created while the storage fails",
     )
-    assert _backup_status(source, error=True)["error"]
+    assert _backup_status(source, "ERROR")["error"]
     source.api.call("DELETE", f"{source.path}/users/{user}", expect=204)
     scenario["broken"] = True
 
@@ -255,7 +267,8 @@ def test_backups_are_turned_off(scenario):
     _require(scenario, "broken")
     source = scenario["source"]
 
-    source.api.call("PUT", source.path, {"backup": None}, expect=200)
+    policy = f"{source.path}/backup_policies/{source.backup_policy()['uuid']}"
+    source.api.call("DELETE", policy, expect=204)
 
     fc.wait_for(
         lambda: (
@@ -264,10 +277,6 @@ def test_backups_are_turned_off(scenario):
         ),
         "archiving to stop",
     )
-    fc.wait_for(
-        lambda: source.instance().get("backup_status") is None,
-        "backup_status to be cleared",
-    )
     scenario["off"] = True
 
 
@@ -275,6 +284,8 @@ def test_clone_of_a_deleted_instance(scenario, api, clones):
     # The backups are found by the storage and the stanza
     _require(scenario, "off")
     source = scenario["source"]
+    # The policy goes with the instance
+    source.create_backup_policy(scenario["storage"])
     api.call("DELETE", source.path, expect=204)
     fc.wait_for(
         lambda: api.call("GET", source.path).status_code == 404,

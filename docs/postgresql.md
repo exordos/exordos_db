@@ -46,6 +46,8 @@ The PostgreSQL service provides a REST-based API for creating and managing Postg
 - `PostgreSQL Instance`: A logical PostgreSQL database instance
 - `Database`: Logical databases within the PostgreSQL instance
 - `User`: Database users with authentication and permissions
+- `Backup Policy`: WAL archiving and periodic backups of the instance, see
+  [Backups](#backups)
 
 ### PostgreSQL Instance (PG)
 
@@ -127,10 +129,16 @@ Infrastructure layer that manages the underlying compute resources:
 
 ## Backups
 
-Setting `backup` on an instance enables continuous WAL archiving and periodic
-backups with [pgBackRest](https://pgbackrest.org/). The storage is described
-in full by the user: DBaaS neither creates buckets nor manages credentials, so
-the S3 lifecycle belongs to manifests and other elements.
+Continuous WAL archiving and periodic backups with
+[pgBackRest](https://pgbackrest.org/) are turned on by a backup policy of the
+instance, a resource of its own under
+`/v1/types/postgres/instances/{uuid}/backup_policies/`. Being separate from
+the instance, it may be created by other than the owner of the instance: an
+element next to the one ordering the instance, as
+`exordos/manifests/communal_pg_cluster_backup.yaml.j2` does for the communal
+PG cluster. The storage is described in full by the policy: DBaaS neither
+creates buckets nor manages credentials, so the S3 lifecycle belongs to
+manifests and other elements.
 In the repository, `exordos/manifests/examples/example_pg_backup.yaml` backs
 an instance up to a bucket of the communal S3 instance and
 `example_pg_restore.yaml` next to it starts a new one from its backups.
@@ -138,12 +146,15 @@ an instance up to a bucket of the communal S3 instance and
 Updating the DBaaS element doesn't reinstall the nodes of existing instances
 at once. They keep the agent they were created with, which doesn't know
 backups, until the first change of the instance reinstalls them from the new
-image, keeping the data disk. Setting `backup` is such a change, so backups
-are taken by the reinstalled nodes.
+image, keeping the data disk. Creating a backup policy is such a change, so
+backups are taken by the reinstalled nodes.
 
 ```json
 {
-  "backup": {
+  "name": "backups",
+  "project_id": "PROJECT_UUID",
+  "instance": "/v1/types/postgres/instances/INSTANCE_UUID",
+  "storage": {
     "kind": "s3",
     "endpoint": "http://10.20.0.30:9000",
     "bucket": "dbaas-backups",
@@ -153,14 +164,15 @@ are taken by the reinstalled nodes.
     "uri_style": "path",
     "verify_tls": true,
     "path": "/exordos_db",
-    "encryption_key": null,
-    "full_interval_hours": 168,
-    "incr_interval_hours": 24,
-    "retention_full": 2
-  }
+    "encryption_key": null
+  },
+  "full_interval_hours": 168,
+  "incr_interval_hours": 24,
+  "retention_full": 2
 }
 ```
 
+- An instance has one policy, a second one is rejected with `409`.
 - `endpoint` is `http://` or `https://` with an optional port and no path.
 - `uri_style` is `path` (default, required for IP endpoints) or `host`.
 - The instance uuid is the pgBackRest stanza, so instances may share a bucket
@@ -171,11 +183,11 @@ are taken by the reinstalled nodes.
 - A full backup is taken every `full_interval_hours`, an incremental one every
   `incr_interval_hours`; `retention_full` full backups are kept together with
   their incremental backups and WAL.
-- Setting `backup` to `null` stops archiving. Backups already in the storage
-  are left there.
+- Deleting the policy stops archiving. Backups already in the storage are
+  left there. The policy is deleted together with the instance.
 
-Credentials are stored in the instance and returned by the API to everyone who
-can read the instance.
+Credentials are stored in the policy and returned by the API to everyone who
+can read it.
 
 On the data plane the agent renders `/etc/pgbackrest/pgbackrest.conf` on every
 node, creates the stanza on the primary and sets `archive_command` through the
@@ -190,24 +202,21 @@ Archiving is turned on only once the stanza is created; until then users,
 databases and replication settings are applied as usual, and the agent keeps
 retrying.
 
-The read-only `backup_status` of the instance tells whether the storage can
-be used, as the primary finds it:
+The read-only `status` and `error` of the policy tell whether the storage
+can be used, as the primary finds it:
 
 ```json
 {
-  "backup_status": {
-    "error": "ERROR: [039]: HTTP request failed with 403 (Forbidden) ..."
-  }
+  "status": "ERROR",
+  "error": "ERROR: [039]: HTTP request failed with 403 (Forbidden) ..."
 }
 ```
 
+- `status` is `NEW` until the primary has reported, then `ACTIVE` or `ERROR`.
 - `error` is why the last attempt failed: the agent creating the stanza, the
   timer reading the backups or taking one. Wrong credentials, a missing
   bucket or an unreachable storage show up here. It is `null` once an attempt
-  succeeds, and is cleared when `backup` changes.
-- `backup_status` is `null`, and left out by the API, while backups are off
-  or before the primary has reported. A working storage gives
-  `{"error": null}`.
+  succeeds, and is cleared once the primary has taken a changed policy.
 
 WAL can go missing from the archive: a primary that goes down before it has
 archived its last segments, WAL dropped while the storage was unreachable.
@@ -244,8 +253,8 @@ already be deleted, its backups are found by the storage and the stanza.
 }
 ```
 
-- The storage fields and `encryption_key` are the same as in `backup` of the
-  source instance.
+- The storage fields and `encryption_key` are the same as in `storage` of the
+  backup policy of the source instance.
 - `stanza` is the uuid of the source instance.
 - `target` is where the recovery stops:
     - `{"kind": "latest"}` (default): replay the whole archive;
@@ -255,8 +264,8 @@ already be deleted, its backups are found by the storage and the stanza.
       recovers to the end of the archive.
 - `version` and `disk_size` must fit the backup: the same PostgreSQL major
   version and enough space for the data.
-- The new instance doesn't take backups unless its own `backup` is set. It
-  uses its own stanza, so the source's backups stay intact even in the same
+- The new instance doesn't take backups unless a backup policy is created for
+  it. It uses its own stanza, so the source's backups stay intact even in the same
   bucket and `path`.
 
 Patroni bootstraps the cluster with `exordos-db-pg-restore`, which runs

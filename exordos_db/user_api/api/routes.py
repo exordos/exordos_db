@@ -29,6 +29,10 @@ class PGUserRoute(routes.Route):
     __controller__ = controllers.PGUserController
 
 
+class PGBackupPolicyRoute(routes.Route):
+    __controller__ = controllers.PGBackupPolicyController
+
+
 class PGInstanceRoute(routes.Route):
     __controller__ = controllers.PGInstanceController
 
@@ -36,6 +40,8 @@ class PGInstanceRoute(routes.Route):
     databases = routes.route(PGDatabaseRoute, resource_route=True)
     # route to /v1/types/postgres/instances/<uuid>/users/[<uuid>]
     users = routes.route(PGUserRoute, resource_route=True)
+    # route to /v1/types/postgres/instances/<uuid>/backup_policies/[<uuid>]
+    backup_policies = routes.route(PGBackupPolicyRoute, resource_route=True)
 
 
 class PGVersionRoute(routes.Route):
