@@ -22,13 +22,13 @@ import yaml
 
 def stable_singleton(session, identifier):
     nodesets = session.execute(
-        "SELECT value FROM ua_resources WHERE uuid = %s AND kind = 'node_set';",
+        "SELECT value FROM ua_actual_resources WHERE uuid = %s AND kind = 'node_set';",
         (identifier,),
     ).fetchall()
     if len(nodesets) != 1 or len(nodesets[0]["value"].get("nodes", {})) != 1:
         return False
     configs = session.execute(
-        "SELECT actual.value FROM ua_resources actual "
+        "SELECT actual.value FROM ua_actual_resources actual "
         "JOIN ua_target_resources target ON actual.uuid = target.uuid "
         "AND actual.kind = target.kind WHERE target.master = %s "
         "AND actual.kind = 'config' AND actual.value->>'path' = "
