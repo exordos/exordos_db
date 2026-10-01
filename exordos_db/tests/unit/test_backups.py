@@ -318,6 +318,7 @@ class TestRestore:
                 node_name=str(uuid.uuid4()),
                 node_ip="10.20.0.40",
                 raft_partner_addrs=["10.20.0.40:5010"],
+                raft_auth="",
                 sync_mode="false",
                 sync_replica_number=0,
                 bootstrap_method=infra_builder.bootstrap_method(instance),

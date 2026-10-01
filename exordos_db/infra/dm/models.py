@@ -64,7 +64,7 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
         command="systemctl reload-or-restart exordos-patroni"
     )
 
-    def _create_config(self, node_uuid, project_id, content=""):
+    def _create_config(self, node_uuid, project_id, content="", on_change=None):
         config = sdk_models.Config(
             uuid=sys_uuid.uuid5(self.uuid, f"config-{node_uuid}"),
             name=str(node_uuid),
@@ -79,8 +79,8 @@ class PGInstance(models.PGInstance, ua_models.InstanceWithDerivativesMixin):
             path="/var/lib/postgresql/patroni/patroni.yml",
             owner="postgres",
             group="postgres",
-            mode="0660",
-            on_change=self.OnReloadFunc,
+            mode="0600",
+            on_change=on_change or self.OnReloadFunc,
         )
 
         return config

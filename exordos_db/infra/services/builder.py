@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import hashlib
 import logging
 import typing as tp
 import uuid
@@ -55,6 +56,7 @@ raft:
   data_dir: /var/lib/postgresql/patroni/raft/
   self_addr: "{node_ip}:5010"
   partner_addrs: {raft_partner_addrs}
+{raft_auth}
 
 bootstrap:
 {bootstrap_method}  dcs:
@@ -168,6 +170,27 @@ def patroni_scope(instance: models.PGInstance) -> str:
 
 def bootstrap_method(instance: models.PGInstance) -> str:
     return "" if instance.restore_from is None else RESTORE_BOOTSTRAP_METHOD
+
+
+def raft_auth(password: str | None) -> str:
+    return "" if password is None else f'  password: "{password}"'
+
+
+def patroni_on_change(password: str | None) -> sdk_models.OnChangeShell:
+    if password is None:
+        return models.PGInstance.OnReloadFunc
+    # Raft does not reload its transport password on SIGHUP. Remember only
+    # its digest; repeated renders should reload without restarting postgres.
+    digest = hashlib.sha256(password.encode()).hexdigest()
+    marker = "/run/exordos-db-raft-auth.sha256"
+    return sdk_models.OnChangeShell(
+        command=(
+            f'if [ "$(cat {marker} 2>/dev/null)" = "{digest}" ]; then '
+            "systemctl reload-or-restart exordos-patroni; else "
+            "systemctl restart exordos-patroni && "
+            f"(umask 077; printf '%s\\n' '{digest}' > {marker}); fi"
+        )
+    )
 
 
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
@@ -297,13 +320,17 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                 node_name=node_uuid,
                 node_ip=node["ipv4"],
                 raft_partner_addrs=node_raft_members,
+                raft_auth=raft_auth(instance.raft_password),
                 sync_mode=sync_mode,
                 sync_replica_number=instance.sync_replica_number,
                 bootstrap_method=bootstrap_method(instance),
                 on_change=instance.OnReloadFunc,
             )
             config = instance._create_config(
-                uuid.UUID(node_uuid), self._project_id, content
+                uuid.UUID(node_uuid),
+                self._project_id,
+                content,
+                on_change=patroni_on_change(instance.raft_password),
             )
             new_objects.append(config)
 

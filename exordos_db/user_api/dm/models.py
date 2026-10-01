@@ -16,6 +16,8 @@
 
 import enum
 import re
+import secrets
+import typing as tp
 
 from gcl_sdk.agents.universal.dm import models as ua_models
 from restalchemy.dm import filters as dm_filters
@@ -101,6 +103,21 @@ class PGInstance(
     # {"phase": ..., "error": ...} of the restore of a new instance as its
     # nodes report it, None when there is none in progress
     restore_status = properties.property(types.AllowNone(types.Dict()), default=None)
+    # None is retained for legacy multi-node clusters until a coordinated
+    # authentication cutover is supported. Never generate secrets on load.
+    raft_password = properties.property(
+        types.AllowNone(types.String(min_length=64, max_length=64)),
+        default=None,
+        read_only=True,
+    )
+
+    def insert(self, session: tp.Any = None) -> None:
+        self.properties["raft_password"].set_value_force(secrets.token_hex(32))
+        super().insert(session=session)
+
+    def get_resource_ignore_fields(self) -> set[str]:
+        # Core resource reports and the PG resource carry no Raft credentials.
+        return {"raft_password"}
 
     def restore_failed(self) -> bool:
         return self.restore_status is not None and bool(self.restore_status["error"])
