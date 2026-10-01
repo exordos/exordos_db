@@ -88,7 +88,11 @@ def test_legacy_singleton_keeps_dcs_state_when_authentication_is_enabled(tmp_pat
         authenticated.destroy()
 
 
-def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path):
+def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path, monkeypatch):
+    import requests
+
+    from exordos_db.agent.universal.drivers import pg
+
     psycopg = pytest.importorskip("psycopg")
     postgres = shutil.which("postgres")
     if postgres is None:
@@ -110,6 +114,7 @@ def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path):
         "restapi": {
             "listen": f"127.0.0.1:{rest_port}",
             "connect_address": f"127.0.0.1:{rest_port}",
+            "authentication": {"username": "patroni", "password": "patroni"},
         },
         "raft": {
             "self_addr": raft_address,
@@ -158,10 +163,15 @@ def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path):
                     connect_timeout=1,
                     autocommit=True,
                 )
-                if not connection.execute("SELECT pg_is_in_recovery()").fetchone()[0]:
+                ready = requests.get(f"http://127.0.0.1:{rest_port}/config", timeout=1)
+                if (
+                    not connection.execute("SELECT pg_is_in_recovery()").fetchone()[0]
+                    and ready.status_code == 200
+                    and "loop_wait" in ready.json()
+                ):
                     return process, connection
                 connection.close()
-            except psycopg.Error:
+            except (psycopg.Error, requests.RequestException):
                 pass
             time.sleep(0.1)
         process.terminate()
@@ -176,6 +186,12 @@ def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path):
 
     original, connection = start()
     try:
+        monkeypatch.setattr(pg.constants, "PATRONI_CONFIG_FILE", str(config_path))
+        monkeypatch.setattr(
+            pg.constants, "PATRONI_API_ENDPOINT", f"http://127.0.0.1:{rest_port}"
+        )
+        client = pg.PatroniClient()
+        assert client.config_patch({"loop_wait": 2})["loop_wait"] == 2
         connection.execute("CREATE TABLE sentinel (value text)")
         connection.execute("INSERT INTO sentinel VALUES ('before-upgrade')")
         identifier = connection.execute(
@@ -185,8 +201,18 @@ def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path):
         stop(original, connection)
 
     config["raft"]["password"] = "a" * 64
+    config["restapi"]["authentication"]["password"] = "a" * 64
     authenticated, connection = start()
     try:
+        endpoint = f"http://127.0.0.1:{rest_port}/config"
+        for credentials in (None, ("patroni", "patroni"), ("patroni", "b" * 64)):
+            assert (
+                requests.patch(
+                    endpoint, json={"loop_wait": 2}, auth=credentials, timeout=3
+                ).status_code
+                == 401
+            )
+        assert client.config_patch({"loop_wait": 2})["loop_wait"] == 2
         assert connection.execute("SELECT value FROM sentinel").fetchone() == (
             "before-upgrade",
         )

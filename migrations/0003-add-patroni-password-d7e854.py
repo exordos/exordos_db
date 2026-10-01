@@ -63,22 +63,22 @@ class MigrationStep(migrations.AbstarctMigrationStep):
     def upgrade(self, session):
         session.execute(
             "ALTER TABLE postgres_instances ADD COLUMN IF NOT EXISTS "
-            "raft_password VARCHAR(64);"
+            "patroni_password VARCHAR(64);"
         )
         # A singleton can change transport credentials with one restart.
         # Existing multi-node clusters require a coordinated cutover.
         instances = session.execute(
             "SELECT uuid FROM postgres_instances "
             "WHERE nodes_number = 1 "
-            "AND raft_password IS NULL;"
+            "AND patroni_password IS NULL;"
         ).fetchall()
         for instance in instances:
             if not stable_singleton(session, instance["uuid"]):
                 continue
             session.execute(
-                "UPDATE postgres_instances SET raft_password = %s, "
+                "UPDATE postgres_instances SET patroni_password = %s, "
                 "updated_at = CURRENT_TIMESTAMP WHERE uuid = %s "
-                "AND raft_password IS NULL;",
+                "AND patroni_password IS NULL;",
                 (token_hex(32), instance["uuid"]),
             )
 

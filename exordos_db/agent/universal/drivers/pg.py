@@ -130,21 +130,25 @@ def get_ttl_hash(seconds=600):
 
 class PatroniClient:
     def __init__(self):
-        self._load_config()
         self._endpoint = constants.PATRONI_API_ENDPOINT
         # We don't need retries/etc because it's local and patroni loves to
         #  return 5XX codes with valid responses
         #  https://patroni.readthedocs.io/en/latest/rest_api.html
         self._client = requests.Session()
-        creds = self._config["restapi"]["authentication"]
-        # TODO: check for config changes?
-        self._client.auth = HTTPBasicAuth(creds["username"], creds["password"])
+        self._config_mtime_ns = None
+        self._load_config()
         self._primary_cache: tuple[int | None, bool] | None = None
 
     def _load_config(self):
+        mtime_ns = os.stat(constants.PATRONI_CONFIG_FILE).st_mtime_ns
+        if mtime_ns == self._config_mtime_ns:
+            return
         with open(constants.PATRONI_CONFIG_FILE, "r") as file:
             config = yaml.safe_load(file)
         self._config = config
+        creds = config["restapi"]["authentication"]
+        self._client.auth = HTTPBasicAuth(creds["username"], creds["password"])
+        self._config_mtime_ns = mtime_ns
 
     def get_full_state(self):
         return self._client.get(f"{self._endpoint}/").json()
@@ -172,6 +176,7 @@ class PatroniClient:
         return response.json()
 
     def config_patch(self, config):
+        self._load_config()
         response = self._client.patch(f"{self._endpoint}/config", json=config)
         response.raise_for_status()
         return response.json()

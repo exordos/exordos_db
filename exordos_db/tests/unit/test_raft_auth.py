@@ -40,7 +40,7 @@ def instance(password=None):
         nodes_number=1,
         version=models.PGVersion(name="v", image="image"),
         project_id=uuid.uuid4(),
-        raft_password=password,
+        patroni_password=password,
     )
 
 
@@ -49,12 +49,12 @@ def test_creation_generates_independent_credentials_and_loading_keeps_them(monke
     first, second = instance(), instance()
     first.insert()
     second.insert()
-    assert len(first.raft_password) == 64
-    assert first.raft_password != second.raft_password
-    restored = instance(first.raft_password)
-    assert restored.raft_password == first.raft_password
-    assert instance(None).raft_password is None
-    assert "raft_password" not in first.to_ua_resource().value
+    assert len(first.patroni_password) == 64
+    assert first.patroni_password != second.patroni_password
+    restored = instance(first.patroni_password)
+    assert restored.patroni_password == first.patroni_password
+    assert instance(None).patroni_password is None
+    assert "patroni_password" not in first.to_ua_resource().value
 
 
 @pytest.mark.parametrize("method", api_c.ALL_RA_METHODS)
@@ -63,7 +63,7 @@ def test_credentials_are_hidden_in_the_user_api(method):
     request = types.SimpleNamespace(
         api_context=types.SimpleNamespace(get_active_method=lambda: method)
     )
-    assert permissions.permission_of("raft_password", request) == (
+    assert permissions.permission_of("patroni_password", request) == (
         field_permissions.Permissions.HIDDEN
     )
 
@@ -107,7 +107,7 @@ def test_authentication_cutover_restarts_once_and_retries_failure(tmp_path):
 
 
 def migration_module():
-    path = Path(__file__).parents[3] / "migrations/0003-add-raft-password-d7e854.py"
+    path = Path(__file__).parents[3] / "migrations/0003-add-patroni-password-d7e854.py"
     spec = importlib.util.spec_from_file_location("raft_migration", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -145,7 +145,7 @@ def test_migration_excludes_incomplete_and_scaling_clusters(count, content, expe
 def test_migration_assigns_secrets_only_to_singletons_and_retries_safely():
     module = migration_module()
     rows = [
-        {"uuid": uuid.uuid4(), "nodes_number": nodes, "raft_password": None}
+        {"uuid": uuid.uuid4(), "nodes_number": nodes, "patroni_password": None}
         for nodes in (1, 1, 3)
     ]
 
@@ -156,7 +156,7 @@ def test_migration_assigns_secrets_only_to_singletons_and_retries_safely():
                 self.selected = [
                     row.copy()
                     for row in rows
-                    if row["nodes_number"] == 1 and row["raft_password"] is None
+                    if row["nodes_number"] == 1 and row["patroni_password"] is None
                 ]
             elif "kind = 'node_set'" in sql:
                 self.selected = [{"value": {"nodes": {"node": {}}}}]
@@ -175,8 +175,8 @@ def test_migration_assigns_secrets_only_to_singletons_and_retries_safely():
                 assert "updated_at = CURRENT_TIMESTAMP" in sql
                 password, identifier = values
                 for row in rows:
-                    if row["uuid"] == identifier and row["raft_password"] is None:
-                        row["raft_password"] = password
+                    if row["uuid"] == identifier and row["patroni_password"] is None:
+                        row["patroni_password"] = password
             return self
 
         def fetchall(self):
@@ -184,11 +184,64 @@ def test_migration_assigns_secrets_only_to_singletons_and_retries_safely():
 
     migration = module.MigrationStep()
     migration.upgrade(Session())
-    passwords = [row["raft_password"] for row in rows]
+    passwords = [row["patroni_password"] for row in rows]
     assert len(passwords[0]) == len(passwords[1]) == 64
     assert passwords[0] != passwords[1]
     assert passwords[2] is None
     migration.upgrade(Session())
-    assert [row["raft_password"] for row in rows] == passwords
+    assert [row["patroni_password"] for row in rows] == passwords
     with pytest.raises(RuntimeError, match="coordinated downgrade"):
         migration.downgrade(Session())
+
+
+@pytest.mark.parametrize("password", [None, "a" * 64])
+def test_rest_api_and_raft_share_the_cluster_password(password):
+    import yaml
+
+    config = yaml.safe_load(
+        builder.PATRONI_CONF_TEMPLATE.format(
+            cluster_name="test",
+            node_name="node",
+            node_ip="127.0.0.1",
+            patroni_password=password or "patroni",
+            raft_auth=builder.raft_auth(password),
+            raft_partner_addrs=["127.0.0.1:5010"],
+            sync_mode="false",
+            sync_replica_number=0,
+            bootstrap_method="",
+        )
+    )
+    assert config["restapi"]["authentication"]["password"] == (password or "patroni")
+    assert config["raft"].get("password") == password
+
+
+def test_patroni_client_rereads_credentials_only_when_mtime_changes(
+    tmp_path, monkeypatch
+):
+    import os
+    from unittest import mock
+
+    from exordos_db.agent.universal.drivers import pg
+
+    path = tmp_path / "patroni.yml"
+
+    def write(password):
+        path.write_text(
+            f"name: node\nrestapi:\n  authentication:\n    username: patroni\n    password: {password}\n"
+        )
+
+    write("patroni")
+    monkeypatch.setattr(pg.constants, "PATRONI_CONFIG_FILE", str(path))
+    client = pg.PatroniClient()
+    client._client.patch = mock.Mock()
+    with mock.patch.object(pg.yaml, "safe_load", wraps=pg.yaml.safe_load) as load:
+        client.config_patch({})
+        client.config_patch({})
+        load.assert_not_called()
+        previous = path.stat().st_mtime_ns
+        write("a" * 64)
+        os.utime(path, ns=(previous + 1000000, previous + 1000000))
+        client.config_patch({})
+        client.config_patch({})
+        assert load.call_count == 1
+        assert client._client.auth.password == "a" * 64
