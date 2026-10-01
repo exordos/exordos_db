@@ -20,12 +20,14 @@ These tests use real Raft listeners and journals, without a deployed cluster.
 """
 
 import getpass
+import importlib.util
 from pathlib import Path
 import shutil
 import socket
 import subprocess
 import sys
 import time
+import uuid
 
 import pytest
 import yaml
@@ -86,6 +88,82 @@ def test_legacy_singleton_keeps_dcs_state_when_authentication_is_enabled(tmp_pat
         assert authenticated.set("/db/scope/after-upgrade", "new-write")
     finally:
         authenticated.destroy()
+
+
+def check_singleton_migration(connection, config):
+    from psycopg.rows import dict_row
+    from psycopg.types.json import Jsonb
+
+    path = Path(__file__).parents[3] / "migrations/0003-add-patroni-password-d7e854.py"
+    spec = importlib.util.spec_from_file_location("patroni_migration", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # Resource UUIDs identify objects; res_uuid identifies their kind/UUID pair.
+    connection.execute(
+        "CREATE TEMP TABLE ua_actual_resources (uuid uuid, "
+        "kind text, res_uuid uuid PRIMARY KEY, value jsonb)"
+    )
+    connection.execute(
+        "CREATE TEMP TABLE ua_target_resources (uuid uuid, "
+        "kind text, res_uuid uuid PRIMARY KEY, master uuid)"
+    )
+    connection.execute(
+        "CREATE TEMP TABLE postgres_instances (uuid uuid PRIMARY KEY, "
+        "nodes_number integer, updated_at timestamp)"
+    )
+    singleton, unreported, multiple, config_uuid = [uuid.uuid4() for _ in range(4)]
+    for identifier, nodes in [(singleton, 1), (unreported, 1), (multiple, 3)]:
+        connection.execute(
+            "INSERT INTO postgres_instances VALUES (%s, %s, %s)",
+            (identifier, nodes, "2020-01-01"),
+        )
+    connection.execute(
+        "INSERT INTO ua_actual_resources VALUES (%s, %s, %s, %s)",
+        (singleton, "node_set", uuid.uuid4(), Jsonb({"nodes": {"node": {}}})),
+    )
+    resource_id = uuid.uuid4()
+    connection.execute(
+        "INSERT INTO ua_actual_resources VALUES (%s, %s, %s, %s)",
+        (
+            config_uuid,
+            "config",
+            resource_id,
+            Jsonb(
+                {
+                    "path": "/var/lib/postgresql/patroni/patroni.yml",
+                    "body": {"kind": "text", "content": yaml.safe_dump(config)},
+                }
+            ),
+        ),
+    )
+    connection.execute(
+        "INSERT INTO ua_target_resources VALUES (%s, %s, %s, %s)",
+        (config_uuid, "config", resource_id, singleton),
+    )
+    with connection.cursor(row_factory=dict_row) as session:
+        module.MigrationStep().upgrade(session)
+        first = session.execute(
+            "SELECT patroni_password, updated_at FROM "
+            "postgres_instances WHERE uuid = %s",
+            (singleton,),
+        ).fetchone()
+        assert len(first["patroni_password"]) == 64
+        assert first["updated_at"].year > 2020
+        module.MigrationStep().upgrade(session)
+        assert (
+            session.execute(
+                "SELECT patroni_password FROM postgres_instances WHERE uuid = %s",
+                (singleton,),
+            ).fetchone()["patroni_password"]
+            == first["patroni_password"]
+        )
+        assert (
+            session.execute(
+                "SELECT count(*) AS count FROM postgres_instances "
+                "WHERE patroni_password IS NULL"
+            ).fetchone()["count"]
+            == 2
+        )
 
 
 def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path, monkeypatch):
@@ -192,6 +270,7 @@ def test_singleton_patroni_restart_keeps_postgres_and_raft_state(tmp_path, monke
         )
         client = pg.PatroniClient()
         assert client.config_patch({"loop_wait": 2})["loop_wait"] == 2
+        check_singleton_migration(connection, config)
         connection.execute("CREATE TABLE sentinel (value text)")
         connection.execute("INSERT INTO sentinel VALUES ('before-upgrade')")
         identifier = connection.execute(
