@@ -87,12 +87,17 @@ fi
 # The config of the core agent names the resource types it serves, so it
 # follows the image rather than the persistent disk it is kept on: rendered
 # anew from the template of the image, keeping the database of the node
-DB_URL=$(grep -m1 '^connection_url *=' "$CORE_AGENT_CONFIG")
-sudo cp "$GC_PATH/etc/exordos_db/core_agent.conf.j2" "${CORE_AGENT_CONFIG}.j2"
-j2 "${CORE_AGENT_CONFIG}.j2" \
-    | DB_URL="$DB_URL" awk '/^connection_url *=/ {print ENVIRON["DB_URL"]; next} {print}' \
-    | sudo tee "${CORE_AGENT_CONFIG}.new" > /dev/null
-sudo mv "${CORE_AGENT_CONFIG}.new" "$CORE_AGENT_CONFIG"
+(
+    set +x
+    DB_URL=$(sudo grep -m1 '^connection_url *=' "$CORE_AGENT_CONFIG")
+    sudo cp "$GC_PATH/etc/exordos_db/core_agent.conf.j2" "${CORE_AGENT_CONFIG}.j2"
+    CONFIG_TMP=$(sudo mktemp "${CORE_AGENT_CONFIG}.XXXXXX")
+    trap 'sudo rm -f "$CONFIG_TMP"' EXIT
+    j2 "${CORE_AGENT_CONFIG}.j2" \
+        | DB_URL="$DB_URL" awk '/^connection_url *=/ {print ENVIRON["DB_URL"]; next} {print}' \
+        | sudo tee "$CONFIG_TMP" > /dev/null
+    sudo mv "$CONFIG_TMP" "$CORE_AGENT_CONFIG"
+)
 
 # The config is kept on the persistent disk, so one written before the IAM
 # client was configurable verifies tokens with the keys of the wrong client
