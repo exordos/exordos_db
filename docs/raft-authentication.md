@@ -1,6 +1,7 @@
-# Raft authentication
+# Patroni and Raft authentication
 
-Each new PostgreSQL instance receives its own random 256-bit Raft password.
+Each new PostgreSQL instance receives its own random 256-bit password shared by
+Patroni REST API authentication and Raft transport.
 The control plane keeps it in the instance database row, excludes it from
 the user API and core resource reports, and sends it through the existing
 encrypted node configuration channel. The resulting Patroni configuration
@@ -9,6 +10,9 @@ administrative access remain sensitive; this does not add encryption at rest.
 
 Patroni passes the password to PySyncObj, which encrypts and authenticates
 Raft transport. `patroni[raft]` installs the required `cryptography` dependency.
+Before each configuration PATCH, the node agent checks the config file
+modification time (`st_mtime_ns`) and rereads REST API credentials only when
+it changes, including when its client predates the upgrade.
 A password change requires restarting Patroni; SIGHUP does not recreate
 the Raft transport. Configuration delivery records only a password digest
 in a root-owned file under `/run`. The first authenticated delivery restarts
@@ -30,7 +34,8 @@ journal and snapshots, and the Patroni scope. It requires a maintenance
 interruption; it does not reinitialize or restore PostgreSQL. Passwords apply
 to the network transport, not to the journal or snapshot format.
 
-Existing multi-node clusters need a coordinated cutover. Passwordless and
+Existing multi-node clusters retain their legacy REST API credentials and
+need a coordinated cutover. Passwordless and
 authenticated PySyncObj peers cannot communicate, so changing passwords
 one node at a time does not provide a compatible rolling upgrade. This
 branch does not implement a cutover or a password rotation API for them.

@@ -74,7 +74,7 @@ class PGInstanceController(
                 "ipsv4": {constants.ALL: field_p.Permissions.RO},
                 "roles_imported": {constants.ALL: field_p.Permissions.HIDDEN},
                 "restore_status": {constants.ALL: field_p.Permissions.RO},
-                "raft_password": {constants.ALL: field_p.Permissions.HIDDEN},
+                "patroni_password": {constants.ALL: field_p.Permissions.HIDDEN},
             },
         ),
     )

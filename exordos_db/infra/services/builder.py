@@ -50,7 +50,7 @@ restapi:
   connect_address: "{node_ip}:8008"
   authentication:
     username: patroni
-    password: patroni
+    password: "{patroni_password}"
 
 raft:
   data_dir: /var/lib/postgresql/patroni/raft/
@@ -320,7 +320,8 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                 node_name=node_uuid,
                 node_ip=node["ipv4"],
                 raft_partner_addrs=node_raft_members,
-                raft_auth=raft_auth(instance.raft_password),
+                patroni_password=instance.patroni_password or "patroni",
+                raft_auth=raft_auth(instance.patroni_password),
                 sync_mode=sync_mode,
                 sync_replica_number=instance.sync_replica_number,
                 bootstrap_method=bootstrap_method(instance),
@@ -330,7 +331,7 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                 uuid.UUID(node_uuid),
                 self._project_id,
                 content,
-                on_change=patroni_on_change(instance.raft_password),
+                on_change=patroni_on_change(instance.patroni_password),
             )
             new_objects.append(config)
 
