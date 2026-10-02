@@ -972,6 +972,8 @@
 <li><code>PostgreSQL Instance</code>: A logical PostgreSQL database instance</li>
 <li><code>Database</code>: Logical databases within the PostgreSQL instance</li>
 <li><code>User</code>: Database users with authentication and permissions</li>
+<li><code>Backup Policy</code>: WAL archiving and periodic backups of the instance, see
+  <a href="#backups">Backups</a></li>
 </ul>
 <h3 id="postgresql-instance-pg">PostgreSQL Instance (PG)<a class="headerlink" href="#postgresql-instance-pg" title="Permanent link">#</a></h3>
 <p>The main PostgreSQL instance entity that manages:</p>
@@ -1039,20 +1041,29 @@
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="backups">Backups<a class="headerlink" href="#backups" title="Permanent link">#</a></h2>
-<p>Setting <code>backup</code> on an instance enables continuous WAL archiving and periodic
-backups with <a href="https://pgbackrest.org/">pgBackRest</a>. The storage is described
-in full by the user: DBaaS neither creates buckets nor manages credentials, so
-the S3 lifecycle belongs to manifests and other elements.
+<p>Continuous WAL archiving and periodic backups with
+<a href="https://pgbackrest.org/">pgBackRest</a> are turned on by a backup policy of the
+instance, a resource of its own under
+<code>/v1/types/postgres/instances/{uuid}/backup_policies/</code>. Being separate from
+the instance, it may be created by other than the owner of the instance: an
+element next to the one ordering the instance, as
+<code>exordos/manifests/communal_pg_cluster_backup.yaml.j2</code> does for the communal
+PG cluster. The storage is described in full by the policy: DBaaS neither
+creates buckets nor manages credentials, so the S3 lifecycle belongs to
+manifests and other elements.
 In the repository, <code>exordos/manifests/examples/example_pg_backup.yaml</code> backs
 an instance up to a bucket of the communal S3 instance and
 <code>example_pg_restore.yaml</code> next to it starts a new one from its backups.</p>
 <p>Updating the DBaaS element doesn't reinstall the nodes of existing instances
 at once. They keep the agent they were created with, which doesn't know
 backups, until the first change of the instance reinstalls them from the new
-image, keeping the data disk. Setting <code>backup</code> is such a change, so backups
-are taken by the reinstalled nodes.</p>
+image, keeping the data disk. Creating a backup policy is such a change, so
+backups are taken by the reinstalled nodes.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">"backup"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"backups"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"project_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PROJECT_UUID"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"instance"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/v1/types/postgres/instances/INSTANCE_UUID"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"storage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"s3"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"endpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://10.20.0.30:9000"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"bucket"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dbaas-backups"</span><span class="p">,</span>
@@ -1062,14 +1073,15 @@ are taken by the reinstalled nodes.</p>
 <span class="w">    </span><span class="nt">"uri_style"</span><span class="p">:</span><span class="w"> </span><span class="s2">"path"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"verify_tls"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/exordos_db"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"encryption_key"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"full_interval_hours"</span><span class="p">:</span><span class="w"> </span><span class="mi">168</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"incr_interval_hours"</span><span class="p">:</span><span class="w"> </span><span class="mi">24</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"retention_full"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
-<span class="w">  </span><span class="p">}</span>
+<span class="w">    </span><span class="nt">"encryption_key"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"full_interval_hours"</span><span class="p">:</span><span class="w"> </span><span class="mi">168</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"incr_interval_hours"</span><span class="p">:</span><span class="w"> </span><span class="mi">24</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"retention_full"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
 <span class="p">}</span>
 </code></pre></div>
 <ul>
+<li>An instance has one policy, a second one is rejected with <code>409</code>.</li>
 <li><code>endpoint</code> is <code>http://</code> or <code>https://</code> with an optional port and no path.</li>
 <li><code>uri_style</code> is <code>path</code> (default, required for IP endpoints) or <code>host</code>.</li>
 <li>The instance uuid is the pgBackRest stanza, so instances may share a bucket
@@ -1080,11 +1092,11 @@ are taken by the reinstalled nodes.</p>
 <li>A full backup is taken every <code>full_interval_hours</code>, an incremental one every
   <code>incr_interval_hours</code>; <code>retention_full</code> full backups are kept together with
   their incremental backups and WAL.</li>
-<li>Setting <code>backup</code> to <code>null</code> stops archiving. Backups already in the storage
-  are left there.</li>
+<li>Deleting the policy stops archiving. Backups already in the storage are
+  left there. The policy is deleted together with the instance.</li>
 </ul>
-<p>Credentials are stored in the instance and returned by the API to everyone who
-can read the instance.</p>
+<p>Credentials are stored in the policy and returned by the API to everyone who
+can read it.</p>
 <p>On the data plane the agent renders <code>/etc/pgbackrest/pgbackrest.conf</code> on every
 node, creates the stanza on the primary and sets <code>archive_command</code> through the
 Patroni DCS. <code>exordos-db-pg-backup.timer</code> runs every 15 minutes on every node
@@ -1097,22 +1109,19 @@ point-in-time recovery.
 Archiving is turned on only once the stanza is created; until then users,
 databases and replication settings are applied as usual, and the agent keeps
 retrying.</p>
-<p>The read-only <code>backup_status</code> of the instance tells whether the storage can
-be used, as the primary finds it:</p>
+<p>The read-only <code>status</code> and <code>error</code> of the policy tell whether the storage
+can be used, as the primary finds it:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">"backup_status"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ERROR: [039]: HTTP request failed with 403 (Forbidden) ..."</span>
-<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ERROR"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ERROR: [039]: HTTP request failed with 403 (Forbidden) ..."</span>
 <span class="p">}</span>
 </code></pre></div>
 <ul>
+<li><code>status</code> is <code>NEW</code> until the primary has reported, then <code>ACTIVE</code> or <code>ERROR</code>.</li>
 <li><code>error</code> is why the last attempt failed: the agent creating the stanza, the
   timer reading the backups or taking one. Wrong credentials, a missing
   bucket or an unreachable storage show up here. It is <code>null</code> once an attempt
-  succeeds, and is cleared when <code>backup</code> changes.</li>
-<li><code>backup_status</code> is <code>null</code>, and left out by the API, while backups are off
-  or before the primary has reported. A working storage gives
-  <code>{"error": null}</code>.</li>
+  succeeds, and is cleared once the primary has taken a changed policy.</li>
 </ul>
 <p>WAL can go missing from the archive: a primary that goes down before it has
 archived its last segments, WAL dropped while the storage was unreachable.
@@ -1145,8 +1154,8 @@ already be deleted, its backups are found by the storage and the stanza.</p>
 <span class="p">}</span>
 </code></pre></div>
 <ul>
-<li>The storage fields and <code>encryption_key</code> are the same as in <code>backup</code> of the
-  source instance.</li>
+<li>The storage fields and <code>encryption_key</code> are the same as in <code>storage</code> of the
+  backup policy of the source instance.</li>
 <li><code>stanza</code> is the uuid of the source instance.</li>
 <li><code>target</code> is where the recovery stops:<ul>
 <li><code>{"kind": "latest"}</code> (default): replay the whole archive;</li>
@@ -1158,8 +1167,8 @@ already be deleted, its backups are found by the storage and the stanza.</p>
 </li>
 <li><code>version</code> and <code>disk_size</code> must fit the backup: the same PostgreSQL major
   version and enough space for the data.</li>
-<li>The new instance doesn't take backups unless its own <code>backup</code> is set. It
-  uses its own stanza, so the source's backups stay intact even in the same
+<li>The new instance doesn't take backups unless a backup policy is created for
+  it. It uses its own stanza, so the source's backups stay intact even in the same
   bucket and <code>path</code>.</li>
 </ul>
 <p>Patroni bootstraps the cluster with <code>exordos-db-pg-restore</code>, which runs

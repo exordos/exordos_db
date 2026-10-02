@@ -17,28 +17,28 @@ components:
       description: Error occurred while processing request
       type: object
       required:
-        - status
-        - json
+      - status
+      - json
       properties:
         status:
           type: integer
           description: The HTTP status code
           minimum: 400
-          exclusiveMaximum: true
+          maximum: 599
           example: 503
         json:
           type: object
           description: Detail error map
           required:
-            - code
-            - type
-            - message
+          - code
+          - type
+          - message
           properties:
             code:
               type: integer
               description: The HTTP status code
               minimum: 400
-              exclusiveMaximum: true
+              maximum: 599
               example: 503
             type:
               type: string
@@ -61,39 +61,40 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         capabilities:
           type: object
           additionalProperties:
             oneOf:
-              - type: string
-              - type: integer
-              - type: boolean
-              - type: object
-              - type: array
-                items: {}
+            - type: string
+            - type: integer
+            - type: boolean
+            - type: object
+            - type: array
+              items: {}
           example:
             key: value
           default: {}
@@ -101,12 +102,12 @@ components:
           type: object
           additionalProperties:
             oneOf:
-              - type: string
-              - type: integer
-              - type: boolean
-              - type: object
-              - type: array
-                items: {}
+            - type: string
+            - type: integer
+            - type: boolean
+            - type: object
+            - type: array
+              items: {}
           example:
             key: value
           default: {}
@@ -117,17 +118,25 @@ components:
         status:
           type: string
           enum:
-            - ACTIVE
-            - DISABLED
-            - ERROR
-            - NEW
+          - ACTIVE
+          - DISABLED
+          - ERROR
+          - NEW
           example: NEW
           default: NEW
       required:
-        - uuid
-        - name
-        - node
+      - uuid
+      - name
+      - node
   parameters:
+    UniversalAgent_uuid:
+      name: uuid
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
     UniversalAgentUuid:
       name: UniversalAgentUuid
       in: path
@@ -135,25 +144,24 @@ components:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
+        readOnly: true
       required: true
-    name:
+    UniversalAgent_name:
       name: name
       in: query
       schema:
         type: string
-        minLength: 0
-        maxLength: 255
         example: any_string
-    description:
+        maxLength: 255
+    UniversalAgent_description:
       name: description
       in: query
       schema:
         type: string
-        minLength: 0
-        maxLength: 255
         example: any_string
+        maxLength: 255
         default: ''
-    created_at:
+    UniversalAgent_created_at:
       name: created_at
       in: query
       schema:
@@ -161,8 +169,9 @@ components:
         x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
         example: '2006-01-02T15:04:05.000576Z'
         format: date-time
+        readOnly: true
         default: '2006-01-02T15:04:05.000576Z'
-    updated_at:
+    UniversalAgent_updated_at:
       name: updated_at
       in: query
       schema:
@@ -170,56 +179,57 @@ components:
         x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
         example: '2006-01-02T15:04:05.000576Z'
         format: date-time
+        readOnly: true
         default: '2006-01-02T15:04:05.000576Z'
-    capabilities:
+    UniversalAgent_capabilities:
       name: capabilities
       in: query
       schema:
         type: object
         additionalProperties:
           oneOf:
-            - type: string
-            - type: integer
-            - type: boolean
-            - type: object
-            - type: array
-              items: {}
+          - type: string
+          - type: integer
+          - type: boolean
+          - type: object
+          - type: array
+            items: {}
         example:
           key: value
         default: {}
-    facts:
+    UniversalAgent_facts:
       name: facts
       in: query
       schema:
         type: object
         additionalProperties:
           oneOf:
-            - type: string
-            - type: integer
-            - type: boolean
-            - type: object
-            - type: array
-              items: {}
+          - type: string
+          - type: integer
+          - type: boolean
+          - type: object
+          - type: array
+            items: {}
         example:
           key: value
         default: {}
-    node:
+    UniversalAgent_node:
       name: node
       in: query
       schema:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
-    status:
+    UniversalAgent_status:
       name: status
       in: query
       schema:
         type: string
         enum:
-          - ACTIVE
-          - DISABLED
-          - ERROR
-          - NEW
+        - ACTIVE
+        - DISABLED
+        - ERROR
+        - NEW
         example: NEW
         default: NEW
 paths:
@@ -270,23 +280,46 @@ paths:
                 properties: {}
         default:
           $ref: '#/components/responses/Error'
-      operationId: Get_OpenApi_specification
+      operationId: Get_OpenApi_specification_3_0_3
+  /specifications/3.1.0:
+    get:
+      summary: OpenApi specification
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: OpenApi specification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Get_OpenApi_specification_3_1_0
   /v1/:
     get:
       summary: Returns a list of all routes in the main route that are collection
       tags: []
       parameters:
-        - name: filters
-          description: "the filters to apply when filtering the routes (Is not\nimplemented
-            now)\n"
-          schema:
-            type: string
-          in: query
-        - name: order_by
-          description: "fields to order the routes by (Is not implemented\nnow)\n"
-          schema:
-            type: string
-          in: query
+      - name: filters
+        description: 'the filters to apply when filtering the routes (Is not
+
+          implemented now)
+
+          '
+        schema:
+          type: string
+        in: query
+      - name: order_by
+        description: 'fields to order the routes by (Is not implemented
+
+          now)
+
+          '
+        schema:
+          type: string
+        in: query
       responses:
         '200':
           description: Get nested urls
@@ -303,15 +336,9 @@ paths:
     get:
       summary: Get UniversalAgent
       tags:
-        - UniversalAgent
+      - UniversalAgent
       parameters:
-        - name: UniversalAgentUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/UniversalAgentUuid'
       responses:
         '200':
           description: UniversalAgent_Get
@@ -326,15 +353,9 @@ paths:
     get:
       summary: Get_payload UniversalAgent
       tags:
-        - UniversalAgent
+      - UniversalAgent
       parameters:
-        - name: UniversalAgentUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/UniversalAgentUuid'
       responses:
         '200':
           description: Get nested urls
@@ -345,13 +366,13 @@ paths:
           $ref: '#/components/responses/Error'
       operationId: Get_payload_v1_agents_UniversalAgentUuid_actions_get_payload
 servers:
-  - url: http://10.20.0.20:11011
-    description: ''
-    variables:
-      version:
-        enum:
-          - v1
-        default: v1
+- url: http://127.0.0.1:11011
+  description: ''
+  variables:
+    version:
+      enum:
+      - v1
+      default: v1
 tags:
-  - name: UniversalAgent
-    description: ''
+- name: UniversalAgent
+  description: ''

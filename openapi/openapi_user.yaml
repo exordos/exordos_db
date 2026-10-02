@@ -17,28 +17,28 @@ components:
       description: Error occurred while processing request
       type: object
       required:
-        - status
-        - json
+      - status
+      - json
       properties:
         status:
           type: integer
           description: The HTTP status code
           minimum: 400
-          exclusiveMaximum: true
+          maximum: 599
           example: 503
         json:
           type: object
           description: Detail error map
           required:
-            - code
-            - type
-            - message
+          - code
+          - type
+          - message
           properties:
             code:
               type: integer
               description: The HTTP status code
               minimum: 400
-              exclusiveMaximum: true
+              maximum: 599
               example: 503
             type:
               type: string
@@ -61,83 +61,191 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
+          example: any_string
           minLength: 1
           maxLength: 255
-          example: any_string
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         project_id:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
+          readOnly: true
           default: NEW
         ipsv4:
           type: array
           items:
             type: string
-            minLength: 0
-            maxLength: 15
             example: any_string
+            maxLength: 15
           example:
-            - any_string
+          - any_string
+          readOnly: true
           default: []
         cpu:
           type: integer
+          example: 64
           minimum: 1
           maximum: 128
-          example: 64
         ram:
           type: integer
+          example: 536871168
           minimum: 512
           maximum: 1073741824
-          example: 536871168
         disk_size:
           type: integer
+          example: 536870916
           minimum: 8
           maximum: 1073741824
-          example: 536870916
         nodes_number:
           type: integer
+          example: 8
           minimum: 1
           maximum: 16
-          example: 8
         sync_replica_number:
           type: integer
+          example: 7
           minimum: 0
           maximum: 15
-          example: 7
           default: 1
         version:
           type: string
+          readOnly: true
+        restore_from:
+          type: object
+          oneOf:
+          - type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                - s3
+              endpoint:
+                type: string
+                pattern: ^https?://[^\s/]+/?$
+                example: ^https?://[^\s/]+/?$
+              bucket:
+                type: string
+                pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+                example: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+              region:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                default: us-east-1
+              access_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              secret_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              uri_style:
+                type: string
+                enum:
+                - host
+                - path
+                example: path
+                default: path
+              verify_tls:
+                type: boolean
+                example: true
+                default: true
+              path:
+                type: string
+                pattern: ^/[A-Za-z0-9_./-]{0,1023}$
+                example: ^/[A-Za-z0-9_./-]{0,1023}$
+                default: /exordos_db
+              encryption_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                nullable: true
+              stanza:
+                type: string
+                example: 00000000-0000-0000-0000-000000000000
+                format: uuid
+              target:
+                type: object
+                oneOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                      - latest
+                  example:
+                    key: value
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                      - time
+                    time:
+                      type: string
+                      x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+                      example: '2006-01-02T15:04:05.000576Z'
+                      format: date-time
+                  example:
+                    key: value
+                example:
+                  key: value
+                default:
+                  kind: latest
+            example:
+              key: value
+          example:
+            key: value
+          readOnly: true
+          nullable: true
+        restore_status:
+          type: object
+          additionalProperties:
+            oneOf:
+            - type: string
+            - type: integer
+            - type: boolean
+            - type: object
+            - type: array
+              items: {}
+          example:
+            key: value
+          readOnly: true
+          nullable: true
       required:
-        - project_id
-        - version
+      - project_id
+      - version
     PGInstance_Create:
       type: object
       properties:
@@ -145,16 +253,16 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
+          example: any_string
           minLength: 1
           maxLength: 255
-          example: any_string
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         project_id:
           type: string
@@ -165,231 +273,441 @@ components:
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
+          readOnly: true
           default: NEW
         ipsv4:
           type: array
           items:
             type: string
-            minLength: 0
-            maxLength: 15
             example: any_string
+            maxLength: 15
           example:
-            - any_string
+          - any_string
+          readOnly: true
           default: []
         cpu:
           type: integer
+          example: 64
           minimum: 1
           maximum: 128
-          example: 64
         ram:
           type: integer
+          example: 536871168
           minimum: 512
           maximum: 1073741824
-          example: 536871168
         disk_size:
           type: integer
+          example: 536870916
           minimum: 8
           maximum: 1073741824
-          example: 536870916
         nodes_number:
           type: integer
+          example: 8
           minimum: 1
           maximum: 16
-          example: 8
         sync_replica_number:
           type: integer
+          example: 7
           minimum: 0
           maximum: 15
-          example: 7
           default: 1
         version:
           type: string
+        restore_from:
+          type: object
+          oneOf:
+          - type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                - s3
+              endpoint:
+                type: string
+                pattern: ^https?://[^\s/]+/?$
+                example: ^https?://[^\s/]+/?$
+              bucket:
+                type: string
+                pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+                example: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+              region:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                default: us-east-1
+              access_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              secret_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              uri_style:
+                type: string
+                enum:
+                - host
+                - path
+                example: path
+                default: path
+              verify_tls:
+                type: boolean
+                example: true
+                default: true
+              path:
+                type: string
+                pattern: ^/[A-Za-z0-9_./-]{0,1023}$
+                example: ^/[A-Za-z0-9_./-]{0,1023}$
+                default: /exordos_db
+              encryption_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                nullable: true
+              stanza:
+                type: string
+                example: 00000000-0000-0000-0000-000000000000
+                format: uuid
+              target:
+                type: object
+                oneOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                      - latest
+                  example:
+                    key: value
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                      - time
+                    time:
+                      type: string
+                      x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+                      example: '2006-01-02T15:04:05.000576Z'
+                      format: date-time
+                  example:
+                    key: value
+                example:
+                  key: value
+                default:
+                  kind: latest
+            example:
+              key: value
+          example:
+            key: value
+          readOnly: true
+          nullable: true
+        restore_status:
+          type: object
+          additionalProperties:
+            oneOf:
+            - type: string
+            - type: integer
+            - type: boolean
+            - type: object
+            - type: array
+              items: {}
+          example:
+            key: value
+          readOnly: true
+          nullable: true
       required:
-        - project_id
-        - version
+      - project_id
+      - version
     PGInstance_Update:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          minLength: 1
-          maxLength: 255
-          example: any_string
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        project_id:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        status:
-          type: string
-          enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
-          example: NEW
-          default: NEW
-        ipsv4:
-          type: array
-          items:
-            type: string
-            minLength: 0
-            maxLength: 15
-            example: any_string
-          example:
-            - any_string
-          default: []
-        cpu:
-          type: integer
-          minimum: 1
-          maximum: 128
-          example: 64
-        ram:
-          type: integer
-          minimum: 512
-          maximum: 1073741824
-          example: 536871168
-        disk_size:
-          type: integer
-          minimum: 8
-          maximum: 1073741824
-          example: 536870916
-        nodes_number:
-          type: integer
-          minimum: 1
-          maximum: 16
-          example: 8
-        sync_replica_number:
-          type: integer
-          minimum: 0
-          maximum: 15
-          example: 7
-          default: 1
-        version:
-          type: string
-      required:
-        - project_id
-        - version
+      $ref: '#/components/schemas/PGInstance_Get'
     PGInstance_Filter:
+      $ref: '#/components/schemas/PGInstance_Get'
+    PGBackupPolicy_Get:
       type: object
       properties:
         uuid:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
-          minLength: 1
-          maxLength: 255
           example: any_string
+          maxLength: 255
+          default: ''
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
-        project_id:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
+        project_id:
+          type: string
+          example: 00000000-0000-0000-0000-000000000000
+          format: uuid
+          readOnly: true
+        instance:
+          type: string
+          readOnly: true
+        storage:
+          type: object
+          oneOf:
+          - type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                - s3
+              endpoint:
+                type: string
+                pattern: ^https?://[^\s/]+/?$
+                example: ^https?://[^\s/]+/?$
+              bucket:
+                type: string
+                pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+                example: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+              region:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                default: us-east-1
+              access_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              secret_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              uri_style:
+                type: string
+                enum:
+                - host
+                - path
+                example: path
+                default: path
+              verify_tls:
+                type: boolean
+                example: true
+                default: true
+              path:
+                type: string
+                pattern: ^/[A-Za-z0-9_./-]{0,1023}$
+                example: ^/[A-Za-z0-9_./-]{0,1023}$
+                default: /exordos_db
+              encryption_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                nullable: true
+            example:
+              key: value
+          example:
+            key: value
+        full_interval_hours:
+          type: integer
+          example: 4392
+          minimum: 1
+          maximum: 8784
+          default: 168
+        incr_interval_hours:
+          type: integer
+          example: 4392
+          minimum: 1
+          maximum: 8784
+          default: 24
+        retention_full:
+          type: integer
+          example: 183
+          minimum: 1
+          maximum: 365
+          default: 2
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
+          readOnly: true
           default: NEW
-        ipsv4:
-          type: array
-          items:
-            type: string
-            minLength: 0
-            maxLength: 15
-            example: any_string
-          example:
-            - any_string
-          default: []
-        cpu:
-          type: integer
-          minimum: 1
-          maximum: 128
-          example: 64
-        ram:
-          type: integer
-          minimum: 512
-          maximum: 1073741824
-          example: 536871168
-        disk_size:
-          type: integer
-          minimum: 8
-          maximum: 1073741824
-          example: 536870916
-        nodes_number:
-          type: integer
-          minimum: 1
-          maximum: 16
-          example: 8
-        sync_replica_number:
-          type: integer
-          minimum: 0
-          maximum: 15
-          example: 7
-          default: 1
-        version:
+        error:
           type: string
+          example: any_string
+          maxLength: 2048
+          readOnly: true
+          nullable: true
       required:
-        - project_id
-        - version
+      - project_id
+      - instance
+      - storage
+    PGBackupPolicy_Create:
+      type: object
+      properties:
+        uuid:
+          type: string
+          example: 00000000-0000-0000-0000-000000000000
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          example: any_string
+          maxLength: 255
+          default: ''
+        description:
+          type: string
+          example: any_string
+          maxLength: 255
+          default: ''
+        created_at:
+          type: string
+          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+          example: '2006-01-02T15:04:05.000576Z'
+          format: date-time
+          readOnly: true
+          default: '2006-01-02T15:04:05.000576Z'
+        updated_at:
+          type: string
+          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+          example: '2006-01-02T15:04:05.000576Z'
+          format: date-time
+          readOnly: true
+          default: '2006-01-02T15:04:05.000576Z'
+        project_id:
+          type: string
+          example: 00000000-0000-0000-0000-000000000000
+          format: uuid
+        instance:
+          type: string
+        storage:
+          type: object
+          oneOf:
+          - type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                - s3
+              endpoint:
+                type: string
+                pattern: ^https?://[^\s/]+/?$
+                example: ^https?://[^\s/]+/?$
+              bucket:
+                type: string
+                pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+                example: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+              region:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                default: us-east-1
+              access_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              secret_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+              uri_style:
+                type: string
+                enum:
+                - host
+                - path
+                example: path
+                default: path
+              verify_tls:
+                type: boolean
+                example: true
+                default: true
+              path:
+                type: string
+                pattern: ^/[A-Za-z0-9_./-]{0,1023}$
+                example: ^/[A-Za-z0-9_./-]{0,1023}$
+                default: /exordos_db
+              encryption_key:
+                type: string
+                pattern: ^\S{1,1024}$
+                example: ^\S{1,1024}$
+                nullable: true
+            example:
+              key: value
+          example:
+            key: value
+        full_interval_hours:
+          type: integer
+          example: 4392
+          minimum: 1
+          maximum: 8784
+          default: 168
+        incr_interval_hours:
+          type: integer
+          example: 4392
+          minimum: 1
+          maximum: 8784
+          default: 24
+        retention_full:
+          type: integer
+          example: 183
+          minimum: 1
+          maximum: 365
+          default: 2
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
+          example: NEW
+          readOnly: true
+          default: NEW
+        error:
+          type: string
+          example: any_string
+          maxLength: 2048
+          readOnly: true
+          nullable: true
+      required:
+      - project_id
+      - instance
+      - storage
+    PGBackupPolicy_Update:
+      $ref: '#/components/schemas/PGBackupPolicy_Get'
+    PGBackupPolicy_Filter:
+      $ref: '#/components/schemas/PGBackupPolicy_Get'
     PGDatabase_Get:
       type: object
       properties:
@@ -397,50 +715,54 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
           pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
           example: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         project_id:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         instance:
           type: string
+          readOnly: true
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
           default: ACTIVE
         owner:
           type: string
       required:
-        - name
-        - project_id
-        - instance
-        - owner
+      - name
+      - project_id
+      - instance
+      - owner
     PGDatabase_Create:
       type: object
       properties:
@@ -448,27 +770,29 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
           pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
           example: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         project_id:
           type: string
@@ -479,121 +803,23 @@ components:
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
           default: ACTIVE
         owner:
           type: string
       required:
-        - name
-        - project_id
-        - instance
-        - owner
+      - name
+      - project_id
+      - instance
+      - owner
     PGDatabase_Update:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
-          example: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        project_id:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        instance:
-          type: string
-        status:
-          type: string
-          enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
-          example: NEW
-          default: ACTIVE
-        owner:
-          type: string
-      required:
-        - name
-        - project_id
-        - instance
-        - owner
+      $ref: '#/components/schemas/PGDatabase_Get'
     PGDatabase_Filter:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
-          example: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        project_id:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        instance:
-          type: string
-        status:
-          type: string
-          enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
-          example: NEW
-          default: ACTIVE
-        owner:
-          type: string
-      required:
-        - name
-        - project_id
-        - instance
-        - owner
+      $ref: '#/components/schemas/PGDatabase_Get'
     PGUser_Get:
       type: object
       properties:
@@ -601,57 +827,58 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
           pattern: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
           example: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
+          readOnly: true
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         project_id:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         instance:
           type: string
+          readOnly: true
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
           default: ACTIVE
         password:
           type: string
+          example: any_string
           minLength: 8
           maxLength: 99
-          example: any_string
-        password_hash:
-          type: string
-          minLength: 1
-          maxLength: 512
-          example: any_string
+          nullable: true
       required:
-        - name
-        - project_id
-        - instance
+      - name
+      - project_id
+      - instance
     PGUser_Create:
       type: object
       properties:
@@ -659,27 +886,29 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
           pattern: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
           example: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         project_id:
           type: string
@@ -690,142 +919,26 @@ components:
         status:
           type: string
           enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
+          - ACTIVE
+          - ERROR
+          - IN_PROGRESS
+          - NEW
           example: NEW
           default: ACTIVE
         password:
           type: string
+          example: any_string
           minLength: 8
           maxLength: 99
-          example: any_string
-        password_hash:
-          type: string
-          minLength: 1
-          maxLength: 512
-          example: any_string
+          nullable: true
       required:
-        - name
-        - project_id
-        - instance
+      - name
+      - project_id
+      - instance
     PGUser_Update:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          pattern: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
-          example: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        project_id:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        instance:
-          type: string
-        status:
-          type: string
-          enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
-          example: NEW
-          default: ACTIVE
-        password:
-          type: string
-          minLength: 8
-          maxLength: 99
-          example: any_string
-        password_hash:
-          type: string
-          minLength: 1
-          maxLength: 512
-          example: any_string
-      required:
-        - name
-        - project_id
-        - instance
+      $ref: '#/components/schemas/PGUser_Get'
     PGUser_Filter:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          pattern: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
-          example: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        project_id:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        instance:
-          type: string
-        status:
-          type: string
-          enum:
-            - ACTIVE
-            - ERROR
-            - IN_PROGRESS
-            - NEW
-          example: NEW
-          default: ACTIVE
-        password:
-          type: string
-          minLength: 8
-          maxLength: 99
-          example: any_string
-        password_hash:
-          type: string
-          minLength: 1
-          maxLength: 512
-          example: any_string
-      required:
-        - name
-        - project_id
-        - instance
+      $ref: '#/components/schemas/PGUser_Get'
     PGVersion_Get:
       type: object
       properties:
@@ -833,144 +946,50 @@ components:
           type: string
           example: 00000000-0000-0000-0000-000000000000
           format: uuid
+          readOnly: true
         name:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         description:
           type: string
-          minLength: 0
-          maxLength: 255
           example: any_string
+          maxLength: 255
           default: ''
         created_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         updated_at:
           type: string
           x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
           example: '2006-01-02T15:04:05.000576Z'
           format: date-time
+          readOnly: true
           default: '2006-01-02T15:04:05.000576Z'
         image:
           type: string
-          minLength: 0
-          maxLength: 2048
           example: any_string
+          maxLength: 2048
     PGVersion_Create:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        image:
-          type: string
-          minLength: 0
-          maxLength: 2048
-          example: any_string
+      $ref: '#/components/schemas/PGVersion_Get'
     PGVersion_Update:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        image:
-          type: string
-          minLength: 0
-          maxLength: 2048
-          example: any_string
+      $ref: '#/components/schemas/PGVersion_Get'
     PGVersion_Filter:
-      type: object
-      properties:
-        uuid:
-          type: string
-          example: 00000000-0000-0000-0000-000000000000
-          format: uuid
-        name:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        description:
-          type: string
-          minLength: 0
-          maxLength: 255
-          example: any_string
-          default: ''
-        created_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        updated_at:
-          type: string
-          x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-          example: '2006-01-02T15:04:05.000576Z'
-          format: date-time
-          default: '2006-01-02T15:04:05.000576Z'
-        image:
-          type: string
-          minLength: 0
-          maxLength: 2048
-          example: any_string
+      $ref: '#/components/schemas/PGVersion_Get'
   parameters:
+    PGInstance_uuid:
+      name: uuid
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
     PGInstanceUuid:
       name: PGInstanceUuid
       in: path
@@ -978,33 +997,33 @@ components:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
+        readOnly: true
       required: true
-    name:
+    PGInstance_name:
       name: name
       in: query
       schema:
         type: string
-        minLength: 0
-        maxLength: 255
         example: any_string
-        default: ''
-    description:
+        minLength: 1
+        maxLength: 255
+    PGInstance_description:
       name: description
       in: query
       schema:
         type: string
-        minLength: 0
-        maxLength: 255
         example: any_string
+        maxLength: 255
         default: ''
-    project_id:
+    PGInstance_project_id:
       name: project_id
       in: query
       schema:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
-    created_at:
+        readOnly: true
+    PGInstance_created_at:
       name: created_at
       in: query
       schema:
@@ -1012,8 +1031,9 @@ components:
         x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
         example: '2006-01-02T15:04:05.000576Z'
         format: date-time
+        readOnly: true
         default: '2006-01-02T15:04:05.000576Z'
-    updated_at:
+    PGInstance_updated_at:
       name: updated_at
       in: query
       schema:
@@ -1021,78 +1041,374 @@ components:
         x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
         example: '2006-01-02T15:04:05.000576Z'
         format: date-time
+        readOnly: true
         default: '2006-01-02T15:04:05.000576Z'
-    status:
+    PGInstance_status:
       name: status
       in: query
       schema:
         type: string
         enum:
-          - ACTIVE
-          - ERROR
-          - IN_PROGRESS
-          - NEW
+        - ACTIVE
+        - ERROR
+        - IN_PROGRESS
+        - NEW
         example: NEW
-        default: ACTIVE
-    ipsv4:
+        default: NEW
+    PGInstance_ipsv4:
       name: ipsv4
       in: query
       schema:
         type: array
         items:
           type: string
-          minLength: 0
-          maxLength: 15
           example: any_string
+          maxLength: 15
         example:
-          - any_string
+        - any_string
         default: []
-    cpu:
+    PGInstance_cpu:
       name: cpu
       in: query
       schema:
         type: integer
+        example: 64
         minimum: 1
         maximum: 128
-        example: 64
-    ram:
+    PGInstance_ram:
       name: ram
       in: query
       schema:
         type: integer
+        example: 536871168
         minimum: 512
         maximum: 1073741824
-        example: 536871168
-    disk_size:
+    PGInstance_disk_size:
       name: disk_size
       in: query
       schema:
         type: integer
+        example: 536870916
         minimum: 8
         maximum: 1073741824
-        example: 536870916
-    nodes_number:
+    PGInstance_nodes_number:
       name: nodes_number
       in: query
       schema:
         type: integer
+        example: 8
         minimum: 1
         maximum: 16
-        example: 8
-    sync_replica_number:
+    PGInstance_sync_replica_number:
       name: sync_replica_number
       in: query
       schema:
         type: integer
+        example: 7
         minimum: 0
         maximum: 15
-        example: 7
         default: 1
-    version:
+    PGInstance_version:
       name: version
       in: query
       schema:
         type: string
+        readOnly: true
+    PGInstance_restore_from:
+      name: restore_from
+      in: query
+      schema:
+        type: object
+        oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - s3
+            endpoint:
+              type: string
+              pattern: ^https?://[^\s/]+/?$
+              example: ^https?://[^\s/]+/?$
+            bucket:
+              type: string
+              pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+              example: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+            region:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+              default: us-east-1
+            access_key:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+            secret_key:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+            uri_style:
+              type: string
+              enum:
+              - host
+              - path
+              example: path
+              default: path
+            verify_tls:
+              type: boolean
+              example: true
+              default: true
+            path:
+              type: string
+              pattern: ^/[A-Za-z0-9_./-]{0,1023}$
+              example: ^/[A-Za-z0-9_./-]{0,1023}$
+              default: /exordos_db
+            encryption_key:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+              nullable: true
+            stanza:
+              type: string
+              example: 00000000-0000-0000-0000-000000000000
+              format: uuid
+            target:
+              type: object
+              oneOf:
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                    - latest
+                example:
+                  key: value
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                    - time
+                  time:
+                    type: string
+                    x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+                    example: '2006-01-02T15:04:05.000576Z'
+                    format: date-time
+                example:
+                  key: value
+              example:
+                key: value
+              default:
+                kind: latest
+          example:
+            key: value
+        example:
+          key: value
+        readOnly: true
+        nullable: true
+    PGInstance_roles_imported:
+      name: roles_imported
+      in: query
+      schema:
+        type: boolean
+        example: true
+        default: false
+    PGInstance_restore_status:
+      name: restore_status
+      in: query
+      schema:
+        type: object
+        additionalProperties:
+          oneOf:
+          - type: string
+          - type: integer
+          - type: boolean
+          - type: object
+          - type: array
+            items: {}
+        example:
+          key: value
+        nullable: true
+    PGBackupPolicy_uuid:
+      name: uuid
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
+    PGBackupPolicyUuid:
+      name: PGBackupPolicyUuid
+      in: path
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
+      required: true
+    PGBackupPolicy_name:
+      name: name
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 255
+        default: ''
+    PGBackupPolicy_description:
+      name: description
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 255
+        default: ''
+    PGBackupPolicy_created_at:
+      name: created_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGBackupPolicy_updated_at:
+      name: updated_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGBackupPolicy_project_id:
+      name: project_id
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
+    PGBackupPolicy_instance:
+      name: instance
+      in: query
+      schema:
+        type: string
+        readOnly: true
+    PGBackupPolicy_storage:
+      name: storage
+      in: query
+      schema:
+        type: object
+        oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - s3
+            endpoint:
+              type: string
+              pattern: ^https?://[^\s/]+/?$
+              example: ^https?://[^\s/]+/?$
+            bucket:
+              type: string
+              pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+              example: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+            region:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+              default: us-east-1
+            access_key:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+            secret_key:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+            uri_style:
+              type: string
+              enum:
+              - host
+              - path
+              example: path
+              default: path
+            verify_tls:
+              type: boolean
+              example: true
+              default: true
+            path:
+              type: string
+              pattern: ^/[A-Za-z0-9_./-]{0,1023}$
+              example: ^/[A-Za-z0-9_./-]{0,1023}$
+              default: /exordos_db
+            encryption_key:
+              type: string
+              pattern: ^\S{1,1024}$
+              example: ^\S{1,1024}$
+              nullable: true
+          example:
+            key: value
+        example:
+          key: value
+    PGBackupPolicy_full_interval_hours:
+      name: full_interval_hours
+      in: query
+      schema:
+        type: integer
+        example: 4392
+        minimum: 1
+        maximum: 8784
+        default: 168
+    PGBackupPolicy_incr_interval_hours:
+      name: incr_interval_hours
+      in: query
+      schema:
+        type: integer
+        example: 4392
+        minimum: 1
+        maximum: 8784
+        default: 24
+    PGBackupPolicy_retention_full:
+      name: retention_full
+      in: query
+      schema:
+        type: integer
+        example: 183
+        minimum: 1
+        maximum: 365
+        default: 2
+    PGBackupPolicy_status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum:
+        - ACTIVE
+        - ERROR
+        - IN_PROGRESS
+        - NEW
+        example: NEW
+        default: NEW
+    PGBackupPolicy_error:
+      name: error
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 2048
+        nullable: true
+    PGDatabase_uuid:
+      name: uuid
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
     PGDatabaseUuid:
       name: PGDatabaseUuid
       in: path
@@ -1100,17 +1416,82 @@ components:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
+        readOnly: true
       required: true
-    instance:
+    PGDatabase_name:
+      name: name
+      in: query
+      schema:
+        type: string
+        pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+        example: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+    PGDatabase_description:
+      name: description
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 255
+        default: ''
+    PGDatabase_created_at:
+      name: created_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGDatabase_updated_at:
+      name: updated_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGDatabase_project_id:
+      name: project_id
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
+    PGDatabase_instance:
       name: instance
       in: query
       schema:
         type: string
-    owner:
+        readOnly: true
+    PGDatabase_status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum:
+        - ACTIVE
+        - ERROR
+        - IN_PROGRESS
+        - NEW
+        example: NEW
+        default: ACTIVE
+    PGDatabase_owner:
       name: owner
       in: query
       schema:
         type: string
+    PGUser_uuid:
+      name: uuid
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
     PGUserUuid:
       name: PGUserUuid
       in: path
@@ -1118,23 +1499,95 @@ components:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
+        readOnly: true
       required: true
-    password:
+    PGUser_name:
+      name: name
+      in: query
+      schema:
+        type: string
+        pattern: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
+        example: ^(?!pg_)(?!dbaas_)(?!postgres$)[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
+        readOnly: true
+    PGUser_description:
+      name: description
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 255
+        default: ''
+    PGUser_created_at:
+      name: created_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGUser_updated_at:
+      name: updated_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGUser_project_id:
+      name: project_id
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
+    PGUser_instance:
+      name: instance
+      in: query
+      schema:
+        type: string
+        readOnly: true
+    PGUser_status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum:
+        - ACTIVE
+        - ERROR
+        - IN_PROGRESS
+        - NEW
+        example: NEW
+        default: ACTIVE
+    PGUser_password:
       name: password
       in: query
       schema:
         type: string
+        example: any_string
         minLength: 8
         maxLength: 99
-        example: any_string
-    password_hash:
+        nullable: true
+    PGUser_password_hash:
       name: password_hash
       in: query
       schema:
         type: string
+        example: any_string
         minLength: 1
         maxLength: 512
-        example: any_string
+    PGVersion_uuid:
+      name: uuid
+      in: query
+      schema:
+        type: string
+        example: 00000000-0000-0000-0000-000000000000
+        format: uuid
+        readOnly: true
     PGVersionUuid:
       name: PGVersionUuid
       in: path
@@ -1142,15 +1595,51 @@ components:
         type: string
         example: 00000000-0000-0000-0000-000000000000
         format: uuid
+        readOnly: true
       required: true
-    image:
+    PGVersion_name:
+      name: name
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 255
+        default: ''
+    PGVersion_description:
+      name: description
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 255
+        default: ''
+    PGVersion_created_at:
+      name: created_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGVersion_updated_at:
+      name: updated_at
+      in: query
+      schema:
+        type: string
+        x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
+        example: '2006-01-02T15:04:05.000576Z'
+        format: date-time
+        readOnly: true
+        default: '2006-01-02T15:04:05.000576Z'
+    PGVersion_image:
       name: image
       in: query
       schema:
         type: string
-        minLength: 0
-        maxLength: 2048
         example: any_string
+        maxLength: 2048
 paths:
   /:
     get:
@@ -1199,23 +1688,46 @@ paths:
                 properties: {}
         default:
           $ref: '#/components/responses/Error'
-      operationId: Get_OpenApi_specification
+      operationId: Get_OpenApi_specification_3_0_3
+  /specifications/3.1.0:
+    get:
+      summary: OpenApi specification
+      tags: []
+      parameters: []
+      responses:
+        '200':
+          description: OpenApi specification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Get_OpenApi_specification_3_1_0
   /v1/:
     get:
       summary: Returns a list of all routes in the main route that are collection
       tags: []
       parameters:
-        - name: filters
-          description: "the filters to apply when filtering the routes (Is not\nimplemented
-            now)\n"
-          schema:
-            type: string
-          in: query
-        - name: order_by
-          description: "fields to order the routes by (Is not implemented\nnow)\n"
-          schema:
-            type: string
-          in: query
+      - name: filters
+        description: 'the filters to apply when filtering the routes (Is not
+
+          implemented now)
+
+          '
+        schema:
+          type: string
+        in: query
+      - name: order_by
+        description: 'fields to order the routes by (Is not implemented
+
+          now)
+
+          '
+        schema:
+          type: string
+        in: query
       responses:
         '200':
           description: Get nested urls
@@ -1250,17 +1762,24 @@ paths:
       summary: Returns a list of all routes in the main route that are collection
       tags: []
       parameters:
-        - name: filters
-          description: "the filters to apply when filtering the routes (Is not\nimplemented
-            now)\n"
-          schema:
-            type: string
-          in: query
-        - name: order_by
-          description: "fields to order the routes by (Is not implemented\nnow)\n"
-          schema:
-            type: string
-          in: query
+      - name: filters
+        description: 'the filters to apply when filtering the routes (Is not
+
+          implemented now)
+
+          '
+        schema:
+          type: string
+        in: query
+      - name: order_by
+        description: 'fields to order the routes by (Is not implemented
+
+          now)
+
+          '
+        schema:
+          type: string
+        in: query
       responses:
         '200':
           description: Get nested urls
@@ -1277,97 +1796,54 @@ paths:
     get:
       summary: Get PGInstances
       tags:
-        - PGInstance
+      - PGInstance
       parameters:
-        - name: name
-          in: query
-          schema:
-            type: string
-            minLength: 0
-            maxLength: 255
-            example: any_string
-            default: ''
-        - name: description
-          in: query
-          schema:
-            type: string
-            minLength: 0
-            maxLength: 255
-            example: any_string
-            default: ''
-        - name: project_id
-          in: query
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-        - name: created_at
-          in: query
-          schema:
-            type: string
-            x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-            example: '2006-01-02T15:04:05.000576Z'
-            format: date-time
-            default: '2006-01-02T15:04:05.000576Z'
-        - name: updated_at
-          in: query
-          schema:
-            type: string
-            x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-            example: '2006-01-02T15:04:05.000576Z'
-            format: date-time
-            default: '2006-01-02T15:04:05.000576Z'
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum:
-              - ACTIVE
-              - ERROR
-              - IN_PROGRESS
-              - NEW
-            example: NEW
-            default: ACTIVE
-        - name: cpu
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 128
-            example: 64
-        - name: ram
-          in: query
-          schema:
-            type: integer
-            minimum: 512
-            maximum: 1073741824
-            example: 536871168
-        - name: disk_size
-          in: query
-          schema:
-            type: integer
-            minimum: 8
-            maximum: 1073741824
-            example: 536870916
-        - name: nodes_number
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 16
-            example: 8
-        - name: sync_replica_number
-          in: query
-          schema:
-            type: integer
-            minimum: 0
-            maximum: 15
-            example: 7
-            default: 1
-        - name: version
-          in: query
-          schema:
-            type: string
+      - name: q
+        in: query
+        required: false
+        description: "Filter expression (a subset of AIP-160). Combines with the field\n\
+          parameters, which stay the typed way to ask for equality.\n\n    name =\
+          \ \"vm1\" AND size > 10\n    tags:\"env:prod\" OR tags:\"env:staging\"\n\
+          \    NOT (state = error) AND created_at >= \"2026-07-01T00:00:00Z\"\n\n\
+          Operators: `=` `!=` `<` `<=` `>` `>=`, `:` (an array holds the element,\n\
+          or with `*` that the field is set), `AND` `OR` `NOT`, parentheses.\nThe\
+          \ keywords are uppercase, and `OR` binds tighter than `AND`. Values\ncarrying\
+          \ `:`, `.` or spaces must be quoted."
+        schema:
+          type: string
+        example: name = "vm1"
+        x-ra-filter-fields:
+        - cpu
+        - created_at
+        - description
+        - disk_size
+        - ipsv4
+        - name
+        - nodes_number
+        - project_id
+        - ram
+        - restore_from
+        - restore_status
+        - roles_imported
+        - status
+        - sync_replica_number
+        - updated_at
+        - uuid
+        - version
+      - $ref: '#/components/parameters/PGInstance_uuid'
+      - $ref: '#/components/parameters/PGInstance_name'
+      - $ref: '#/components/parameters/PGInstance_description'
+      - $ref: '#/components/parameters/PGInstance_project_id'
+      - $ref: '#/components/parameters/PGInstance_created_at'
+      - $ref: '#/components/parameters/PGInstance_updated_at'
+      - $ref: '#/components/parameters/PGInstance_status'
+      - $ref: '#/components/parameters/PGInstance_cpu'
+      - $ref: '#/components/parameters/PGInstance_ram'
+      - $ref: '#/components/parameters/PGInstance_disk_size'
+      - $ref: '#/components/parameters/PGInstance_nodes_number'
+      - $ref: '#/components/parameters/PGInstance_sync_replica_number'
+      - $ref: '#/components/parameters/PGInstance_version'
+      - $ref: '#/components/parameters/PGInstance_roles_imported'
       responses:
         '200':
           description: PGInstance_Filter
@@ -1383,7 +1859,7 @@ paths:
     post:
       summary: Create PGInstance
       tags:
-        - PGInstance
+      - PGInstance
       parameters: []
       responses:
         '201':
@@ -1406,15 +1882,9 @@ paths:
     get:
       summary: Get PGInstance
       tags:
-        - PGInstance
+      - PGInstance
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '200':
           description: PGInstance_Get
@@ -1428,15 +1898,9 @@ paths:
     put:
       summary: Update PGInstance
       tags:
-        - PGInstance
+      - PGInstance
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '200':
           description: PGInstance_Update
@@ -1457,34 +1921,119 @@ paths:
     delete:
       summary: Delete PGInstance
       tags:
-        - PGInstance
+      - PGInstance
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '204':
           description: PGInstance_Delete
         default:
           $ref: '#/components/responses/Error'
       operationId: Delete_v1_types_postgres_instances_PGInstanceUuid
+  /v1/types/postgres/instances/{PGInstanceUuid}/backup_policies/:
+    get:
+      summary: Get PGBackupPolicys
+      tags:
+      - PGBackupPolicy
+      parameters:
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      responses:
+        '200':
+          description: PGBackupPolicy_Filter
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PGBackupPolicy_Filter'
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Filter_v1_types_postgres_instances_PGInstanceUuid_backup_policies
+    post:
+      summary: Create PGBackupPolicy
+      tags:
+      - PGBackupPolicy
+      parameters:
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      responses:
+        '201':
+          description: PGBackupPolicy_Create
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PGBackupPolicy_Create'
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Create_v1_types_postgres_instances_PGInstanceUuid_backup_policies
+      requestBody:
+        description: PGBackupPolicy_Create
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PGBackupPolicy_Create'
+  /v1/types/postgres/instances/{PGInstanceUuid}/backup_policies/{PGBackupPolicyUuid}:
+    get:
+      summary: Get PGBackupPolicy
+      tags:
+      - PGBackupPolicy
+      parameters:
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGBackupPolicyUuid'
+      responses:
+        '200':
+          description: PGBackupPolicy_Get
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PGBackupPolicy_Get'
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Get_v1_types_postgres_instances_PGInstanceUuid_backup_policies_PGBackupPolicyUuid
+    put:
+      summary: Update PGBackupPolicy
+      tags:
+      - PGBackupPolicy
+      parameters:
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGBackupPolicyUuid'
+      responses:
+        '200':
+          description: PGBackupPolicy_Update
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PGBackupPolicy_Update'
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Update_v1_types_postgres_instances_PGInstanceUuid_backup_policies_PGBackupPolicyUuid
+      requestBody:
+        description: PGBackupPolicy_Update
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PGBackupPolicy_Update'
+    delete:
+      summary: Delete PGBackupPolicy
+      tags:
+      - PGBackupPolicy
+      parameters:
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGBackupPolicyUuid'
+      responses:
+        '204':
+          description: PGBackupPolicy_Delete
+        default:
+          $ref: '#/components/responses/Error'
+      operationId: Delete_v1_types_postgres_instances_PGInstanceUuid_backup_policies_PGBackupPolicyUuid
   /v1/types/postgres/instances/{PGInstanceUuid}/databases/:
     get:
       summary: Get PGDatabases
       tags:
-        - PGDatabase
+      - PGDatabase
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '200':
           description: PGDatabase_Filter
@@ -1500,15 +2049,9 @@ paths:
     post:
       summary: Create PGDatabase
       tags:
-        - PGDatabase
+      - PGDatabase
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '201':
           description: PGDatabase_Create
@@ -1530,22 +2073,10 @@ paths:
     get:
       summary: Get PGDatabase
       tags:
-        - PGDatabase
+      - PGDatabase
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
-        - name: PGDatabaseUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGDatabaseUuid'
       responses:
         '200':
           description: PGDatabase_Get
@@ -1559,22 +2090,10 @@ paths:
     put:
       summary: Update PGDatabase
       tags:
-        - PGDatabase
+      - PGDatabase
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
-        - name: PGDatabaseUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGDatabaseUuid'
       responses:
         '200':
           description: PGDatabase_Update
@@ -1595,22 +2114,10 @@ paths:
     delete:
       summary: Delete PGDatabase
       tags:
-        - PGDatabase
+      - PGDatabase
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
-        - name: PGDatabaseUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGDatabaseUuid'
       responses:
         '204':
           description: PGDatabase_Delete
@@ -1621,15 +2128,9 @@ paths:
     get:
       summary: Get PGUsers
       tags:
-        - PGUser
+      - PGUser
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '200':
           description: PGUser_Filter
@@ -1645,15 +2146,9 @@ paths:
     post:
       summary: Create PGUser
       tags:
-        - PGUser
+      - PGUser
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
       responses:
         '201':
           description: PGUser_Create
@@ -1675,22 +2170,10 @@ paths:
     get:
       summary: Get PGUser
       tags:
-        - PGUser
+      - PGUser
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
-        - name: PGUserUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGUserUuid'
       responses:
         '200':
           description: PGUser_Get
@@ -1704,22 +2187,10 @@ paths:
     put:
       summary: Update PGUser
       tags:
-        - PGUser
+      - PGUser
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
-        - name: PGUserUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGUserUuid'
       responses:
         '200':
           description: PGUser_Update
@@ -1740,22 +2211,10 @@ paths:
     delete:
       summary: Delete PGUser
       tags:
-        - PGUser
+      - PGUser
       parameters:
-        - name: PGInstanceUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
-        - name: PGUserUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGInstanceUuid'
+      - $ref: '#/components/parameters/PGUserUuid'
       responses:
         '204':
           description: PGUser_Delete
@@ -1766,47 +2225,35 @@ paths:
     get:
       summary: Get PGVersions
       tags:
-        - PGVersion
+      - PGVersion
       parameters:
-        - name: name
-          in: query
-          schema:
-            type: string
-            minLength: 0
-            maxLength: 255
-            example: any_string
-            default: ''
-        - name: description
-          in: query
-          schema:
-            type: string
-            minLength: 0
-            maxLength: 255
-            example: any_string
-            default: ''
-        - name: created_at
-          in: query
-          schema:
-            type: string
-            x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-            example: '2006-01-02T15:04:05.000576Z'
-            format: date-time
-            default: '2006-01-02T15:04:05.000576Z'
-        - name: updated_at
-          in: query
-          schema:
-            type: string
-            x-ogen-time-format: '2006-01-02T15:04:05.000576Z'
-            example: '2006-01-02T15:04:05.000576Z'
-            format: date-time
-            default: '2006-01-02T15:04:05.000576Z'
-        - name: image
-          in: query
-          schema:
-            type: string
-            minLength: 0
-            maxLength: 2048
-            example: any_string
+      - name: q
+        in: query
+        required: false
+        description: "Filter expression (a subset of AIP-160). Combines with the field\n\
+          parameters, which stay the typed way to ask for equality.\n\n    name =\
+          \ \"vm1\" AND size > 10\n    tags:\"env:prod\" OR tags:\"env:staging\"\n\
+          \    NOT (state = error) AND created_at >= \"2026-07-01T00:00:00Z\"\n\n\
+          Operators: `=` `!=` `<` `<=` `>` `>=`, `:` (an array holds the element,\n\
+          or with `*` that the field is set), `AND` `OR` `NOT`, parentheses.\nThe\
+          \ keywords are uppercase, and `OR` binds tighter than `AND`. Values\ncarrying\
+          \ `:`, `.` or spaces must be quoted."
+        schema:
+          type: string
+        example: name = "vm1"
+        x-ra-filter-fields:
+        - created_at
+        - description
+        - image
+        - name
+        - updated_at
+        - uuid
+      - $ref: '#/components/parameters/PGVersion_uuid'
+      - $ref: '#/components/parameters/PGVersion_name'
+      - $ref: '#/components/parameters/PGVersion_description'
+      - $ref: '#/components/parameters/PGVersion_created_at'
+      - $ref: '#/components/parameters/PGVersion_updated_at'
+      - $ref: '#/components/parameters/PGVersion_image'
       responses:
         '200':
           description: PGVersion_Filter
@@ -1822,7 +2269,7 @@ paths:
     post:
       summary: Create PGVersion
       tags:
-        - PGVersion
+      - PGVersion
       parameters: []
       responses:
         '201':
@@ -1845,15 +2292,9 @@ paths:
     get:
       summary: Get PGVersion
       tags:
-        - PGVersion
+      - PGVersion
       parameters:
-        - name: PGVersionUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGVersionUuid'
       responses:
         '200':
           description: PGVersion_Get
@@ -1867,15 +2308,9 @@ paths:
     put:
       summary: Update PGVersion
       tags:
-        - PGVersion
+      - PGVersion
       parameters:
-        - name: PGVersionUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGVersionUuid'
       responses:
         '200':
           description: PGVersion_Update
@@ -1896,15 +2331,9 @@ paths:
     delete:
       summary: Delete PGVersion
       tags:
-        - PGVersion
+      - PGVersion
       parameters:
-        - name: PGVersionUuid
-          in: path
-          schema:
-            type: string
-            example: 00000000-0000-0000-0000-000000000000
-            format: uuid
-          required: true
+      - $ref: '#/components/parameters/PGVersionUuid'
       responses:
         '204':
           description: PGVersion_Delete
@@ -1912,19 +2341,21 @@ paths:
           $ref: '#/components/responses/Error'
       operationId: Delete_v1_types_postgres_versions_PGVersionUuid
 servers:
-  - url: http://10.20.0.20:8080
-    description: ''
-    variables:
-      version:
-        enum:
-          - v1
-        default: v1
+- url: http://127.0.0.1:8080
+  description: ''
+  variables:
+    version:
+      enum:
+      - v1
+      default: v1
 tags:
-  - name: PGDatabase
-    description: ''
-  - name: PGUser
-    description: ''
-  - name: PGInstance
-    description: ''
-  - name: PGVersion
-    description: ''
+- name: PGBackupPolicy
+  description: ''
+- name: PGDatabase
+  description: ''
+- name: PGUser
+  description: ''
+- name: PGInstance
+  description: ''
+- name: PGVersion
+  description: ''
