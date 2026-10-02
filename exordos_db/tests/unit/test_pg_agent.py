@@ -22,6 +22,12 @@ import requests
 
 from exordos_db.agent.universal.drivers import pg
 
+
+@pytest.fixture(autouse=True)
+def dp_resources(monkeypatch):
+    monkeypatch.setattr(pg.pg_tuning, "node_resources", lambda: (2, 4096))
+
+
 ADOPTING = {
     "uuid": str(uuid.uuid4()),
     "name": "restored",
@@ -126,7 +132,10 @@ class FakePatroni:
         return {"members": members}
 
     def config_get(self):
-        return {"synchronous_node_count": 0, "postgresql": {"parameters": {}}}
+        return {
+            "synchronous_node_count": 0,
+            "postgresql": {"parameters": pg.pg_tuning.calculate_settings(2, 4096)},
+        }
 
     def get_full_state(self):
         return {"timeline": 3}
@@ -531,3 +540,70 @@ def test_no_backup_state_without_backups(monkeypatch):
     instance.dump_to_dp()
 
     assert instance.backup_state is None
+
+
+def test_tuning_only_patches_managed_changes():
+    patroni = FakePatroni()
+    desired = pg.pg_tuning.calculate_settings(2, 4096)
+    actual = {**desired, "shared_buffers": "128MB", "archive_command": "custom"}
+    patroni.config_get = lambda: {"postgresql": {"parameters": actual}}
+    instance = _managed_node(FakePsql(), patroni, None)
+
+    instance._reconcile_tuning()
+    assert patroni.patches == [
+        {"postgresql": {"parameters": {"shared_buffers": "1024MB"}}}
+    ]
+    actual["shared_buffers"] = "1024MB"
+    instance._reconcile_tuning()
+    assert len(patroni.patches) == 1
+
+
+def test_tuning_resource_failure_preserves_configuration(monkeypatch):
+    def unavailable():
+        raise OSError("unavailable")
+
+    monkeypatch.setattr(pg.pg_tuning, "node_resources", unavailable)
+    patroni = FakePatroni()
+    instance = _managed_node(FakePsql(), patroni, None)
+    instance._reconcile_tuning()
+    assert patroni.patches == []
+
+
+def test_poll_recalculates_tuning_after_resize(monkeypatch):
+    patroni = FakePatroni()
+    instance = _restored_node(FakePsql(), patroni, monkeypatch)
+    monkeypatch.setattr(pg.pg_tuning, "node_resources", lambda: (16, 8192))
+    instance.restore_from_dp()
+    parameters = patroni.patches[0]["postgresql"]["parameters"]
+    assert parameters["shared_buffers"] == "2048MB"
+    assert parameters["max_parallel_workers"] == 16
+
+
+def test_apply_delivers_tuning_to_existing_cluster(monkeypatch):
+    FakeRepository(monkeypatch)
+    patroni = FakePatroni()
+    patroni.config_get = lambda: {
+        "postgresql": {
+            "parameters": {"max_connections": 500, "autovacuum_max_workers": 5}
+        }
+    }
+    instance = _managed_node(FakePsql(), patroni, None)
+    instance.dump_to_dp()
+    tuning = next(
+        patch["postgresql"]["parameters"]
+        for patch in patroni.patches
+        if "shared_buffers" in patch.get("postgresql", {}).get("parameters", {})
+    )
+    assert tuning["shared_buffers"] == "1024MB"
+    assert tuning["work_mem"] == "4096kB"
+    assert "max_connections" not in tuning
+    assert "autovacuum_max_workers" not in tuning
+    assert "archive_command" not in tuning
+
+
+def test_replica_poll_does_not_change_shared_tuning(monkeypatch):
+    patroni = FakePatroni(primary=False)
+    instance = _restored_node(FakePsql(), patroni, monkeypatch)
+    monkeypatch.setattr(pg.pg_tuning, "node_resources", lambda: (16, 8192))
+    instance.restore_from_dp()
+    assert patroni.patches == []
