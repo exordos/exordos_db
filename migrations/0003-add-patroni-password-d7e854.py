@@ -45,7 +45,15 @@ def stable_singleton(session, identifier):
     if not isinstance(patroni, dict):
         return False
     raft = patroni.get("raft", {})
-    return set(raft.get("partner_addrs", ())) == {raft.get("self_addr")}
+    if not isinstance(raft, dict):
+        return False
+    self_addr = raft.get("self_addr")
+    partner_addrs = raft.get("partner_addrs")
+    if not isinstance(self_addr, str) or not self_addr:
+        return False
+    if not isinstance(partner_addrs, list) or not partner_addrs:
+        return False
+    return all(partner == self_addr for partner in partner_addrs)
 
 
 class MigrationStep(migrations.AbstarctMigrationStep):
