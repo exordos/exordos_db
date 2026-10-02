@@ -1229,6 +1229,16 @@ components:
         example:
           key: value
         nullable: true
+    PGInstance_patroni_password:
+      name: patroni_password
+      in: query
+      schema:
+        type: string
+        example: ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss
+        minLength: 64
+        maxLength: 64
+        readOnly: true
+        nullable: true
     PGBackupPolicy_uuid:
       name: uuid
       in: query
@@ -1820,6 +1830,7 @@ paths:
         - ipsv4
         - name
         - nodes_number
+        - patroni_password
         - project_id
         - ram
         - restore_from
@@ -1844,6 +1855,7 @@ paths:
       - $ref: '#/components/parameters/PGInstance_sync_replica_number'
       - $ref: '#/components/parameters/PGInstance_version'
       - $ref: '#/components/parameters/PGInstance_roles_imported'
+      - $ref: '#/components/parameters/PGInstance_patroni_password'
       responses:
         '200':
           description: PGInstance_Filter
