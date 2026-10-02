@@ -122,7 +122,17 @@ def migration_module():
         (1, "raft: {self_addr: n1, partner_addrs: [n1, n2]}", False),
         (1, "", False),
         (1, "[invalid", False),
+        (1, "raft: null", False),
+        (1, "raft: []", False),
+        (1, "raft: {self_addr: n1, partner_addrs: 1}", False),
+        (1, "raft: {self_addr: n1, partner_addrs: n1}", False),
+        (1, "raft: {self_addr: n1, partner_addrs: [[n1]]}", False),
+        (1, "raft: {self_addr: [n1], partner_addrs: [n1]}", False),
+        (1, "raft: {partner_addrs: [null]}", False),
+        (1, "raft: {self_addr: null, partner_addrs: [null]}", False),
+        (1, "raft: {self_addr: '', partner_addrs: ['']}", False),
         (1, "raft: {self_addr: n1, partner_addrs: [n1]}", True),
+        (1, "raft: {self_addr: n1, partner_addrs: [n1, n1]}", True),
     ],
 )
 def test_migration_excludes_incomplete_and_scaling_clusters(count, content, expected):
