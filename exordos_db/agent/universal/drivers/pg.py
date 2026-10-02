@@ -36,6 +36,7 @@ from restalchemy.dm import types as ra_types
 import yaml
 
 from exordos_db.common import constants
+from exordos_db.common import pg_tuning
 from exordos_db.common import pgbackrest
 
 LOG = logging.getLogger(__name__)
@@ -442,6 +443,23 @@ WHERE d.datname not in """
         LOG.info("DCS patch: %s", tconfig)
         self.c.pclient.config_patch(tconfig)
 
+    def _reconcile_tuning(self) -> None:
+        """Patch the primary's shared profile for a homogeneous node set."""
+        try:
+            cpu, ram = pg_tuning.node_resources()
+        except (OSError, ValueError) as exc:
+            LOG.warning("Cannot determine DP resources for PostgreSQL tuning: %s", exc)
+            return
+        desired = pg_tuning.calculate_settings(cpu, ram)
+        config = self.c.pclient.config_get()
+        actual = config.get("postgresql", {}).get("parameters", {})
+        changed = {
+            key: value for key, value in desired.items() if actual.get(key) != value
+        }
+        if changed:
+            LOG.info("PostgreSQL tuning for %s CPUs, %s MiB RAM: %s", cpu, ram, changed)
+            self.c.pclient.config_patch({"postgresql": {"parameters": changed}})
+
     def _fill_DCS(self, config: dict[str, tp.Any]) -> None:
         self.sync_replica_number = config["synchronous_node_count"]
 
@@ -526,6 +544,7 @@ WHERE d.datname not in """
         # is removed and turned on only once the stanza exists.
         if primary:
             self._reconcile_DCS(archiving=self.backup is None)
+            self._reconcile_tuning()
 
         # Every node keeps the config, any of them may become the primary
         if pgbackrest.apply_spec(self.backup):
@@ -600,6 +619,8 @@ WHERE d.datname not in """
             constants.VMAGENT_DATABASES_SD_FILE,
             database_scrape_targets(self.databases, self._scrape_labels()),
         )
+        if self.c.pclient.is_primary(get_ttl_hash(seconds=20)):
+            self._reconcile_tuning()
         config = self.c.pclient.config_get()
         self._fill_DCS(config)
         self._fill_backup(config)
