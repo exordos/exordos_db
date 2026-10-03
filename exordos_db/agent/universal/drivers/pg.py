@@ -139,6 +139,7 @@ class PatroniClient:
         self._config_mtime_ns = None
         self._load_config()
         self._primary_cache: tuple[int | None, bool] | None = None
+        self.tuning_resources: tuple[int, int] | None = None
 
     def _load_config(self):
         mtime_ns = os.stat(constants.PATRONI_CONFIG_FILE).st_mtime_ns
@@ -450,6 +451,8 @@ WHERE d.datname not in """
         except (OSError, ValueError) as exc:
             LOG.warning("Cannot determine DP resources for PostgreSQL tuning: %s", exc)
             return
+        if self.c.pclient.tuning_resources == (cpu, ram):
+            return
         desired = pg_tuning.calculate_settings(cpu, ram)
         config = self.c.pclient.config_get()
         actual = config.get("postgresql", {}).get("parameters", {})
@@ -459,6 +462,7 @@ WHERE d.datname not in """
         if changed:
             LOG.info("PostgreSQL tuning for %s CPUs, %s MiB RAM: %s", cpu, ram, changed)
             self.c.pclient.config_patch({"postgresql": {"parameters": changed}})
+        self.c.pclient.tuning_resources = (cpu, ram)
 
     def _fill_DCS(self, config: dict[str, tp.Any]) -> None:
         self.sync_replica_number = config["synchronous_node_count"]

@@ -119,6 +119,7 @@ class FakePatroni:
         self.down = down
         self.leader = leader
         self.patches = []
+        self.tuning_resources = None
 
     def is_primary(self, ttl_hash=None):
         if self.down:
@@ -569,9 +570,45 @@ def test_tuning_resource_failure_preserves_configuration(monkeypatch):
     assert patroni.patches == []
 
 
+def test_tuning_skips_unchanged_resources_on_recreated_instance(monkeypatch):
+    patroni = FakePatroni()
+    instance = _managed_node(FakePsql(), patroni, None)
+    instance._reconcile_tuning()
+
+    def unexpected():
+        pytest.fail("Unchanged resources must not calculate or read DCS")
+
+    patroni.config_get = unexpected
+    monkeypatch.setattr(pg.pg_tuning, "calculate_settings", lambda *args: unexpected())
+    instance = _managed_node(FakePsql(), patroni, None)
+    instance._reconcile_tuning()
+    assert patroni.patches == []
+
+
+def test_tuning_retries_after_patch_failure():
+    patroni = FakePatroni()
+    patroni.config_get = lambda: {"postgresql": {"parameters": {}}}
+    patch = patroni.config_patch
+
+    def unavailable(config):
+        raise requests.ConnectionError("Patroni is restarting")
+
+    patroni.config_patch = unavailable
+    instance = _managed_node(FakePsql(), patroni, None)
+    with pytest.raises(requests.ConnectionError):
+        instance._reconcile_tuning()
+    assert patroni.tuning_resources is None
+
+    patroni.config_patch = patch
+    instance._reconcile_tuning()
+    assert len(patroni.patches) == 1
+
+
 def test_poll_recalculates_tuning_after_resize(monkeypatch):
     patroni = FakePatroni()
     instance = _restored_node(FakePsql(), patroni, monkeypatch)
+    instance.restore_from_dp()
+    assert patroni.patches == []
     monkeypatch.setattr(pg.pg_tuning, "node_resources", lambda: (16, 8192))
     instance.restore_from_dp()
     parameters = patroni.patches[0]["postgresql"]["parameters"]
@@ -607,3 +644,8 @@ def test_replica_poll_does_not_change_shared_tuning(monkeypatch):
     monkeypatch.setattr(pg.pg_tuning, "node_resources", lambda: (16, 8192))
     instance.restore_from_dp()
     assert patroni.patches == []
+    assert patroni.tuning_resources is None
+    patroni.primary = True
+    instance.restore_from_dp()
+    assert patroni.tuning_resources == (16, 8192)
+    assert patroni.patches[0]["postgresql"]["parameters"]["shared_buffers"] == "2048MB"
