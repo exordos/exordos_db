@@ -95,7 +95,8 @@ Infrastructure layer that manages the underlying compute resources:
 The primary calculates a shared profile from its CPU affinity and total VM
 RAM, then patches changed parameters in Patroni DCS on target application and
 polling. Node sets must have uniformly sized VMs. The agent owns the parameters
-below; unrelated DCS settings are preserved.
+below; unrelated DCS settings are preserved. DCS is checked once per agent
+start and again when CPU or RAM changes; unchanged resources skip tuning.
 
 Sizing floors preserve PG18 defaults and the fixed connection/vacuum limits:
 
