@@ -90,6 +90,41 @@ Infrastructure layer that manages the underlying compute resources:
 - Data disk for database storage
 - Automatic failover and replication
 
+## Automatic PostgreSQL resource settings
+
+The primary calculates a shared profile from its CPU affinity and total VM
+RAM, then patches changed parameters in Patroni DCS on target application and
+polling. Node sets must have uniformly sized VMs. The agent owns the parameters
+below; unrelated DCS settings are preserved. DCS is checked once per agent
+start and again when CPU or RAM changes; unchanged resources skip tuning.
+
+Sizing floors preserve PG18 defaults and the fixed connection/vacuum limits:
+
+| Parameter | Sizing rule | Bounds |
+| --- | --- | --- |
+| `shared_buffers` | 25% RAM; 12.5% below 1 GiB | At least 128 MiB |
+| `effective_cache_size` | 70% RAM; planner estimate, not allocation | At least 4 GiB |
+| `max_connections` | Fixed | 500 |
+| `work_mem` | 15% RAM / (500 connections × 6) | 4–16 MiB |
+| `hash_mem_multiplier` | Fixed; the factor 6 allows three hash operations | 2 |
+| `maintenance_work_mem` | 5% RAM | 64 MiB–1 GiB |
+| `autovacuum_max_workers` | Fixed | 5 |
+| `autovacuum_work_mem` | 10% RAM / 5 workers | 64–256 MiB per worker |
+| `max_worker_processes` | CPU count + 4 | At least 8 |
+| `max_parallel_workers` | CPU count | At least 8 |
+| `max_parallel_workers_per_gather` | Half the CPU count | 2–4 |
+| `max_parallel_maintenance_workers` | Half the CPU count | 2–4 |
+
+Floors take precedence over sizing budgets on small nodes. These are not hard
+memory limits: size client connection pools to available RAM; the 500-connection
+cap is not a safe concurrency budget for small nodes.
+
+Resource detection failures preserve existing settings. Startup parameters
+remain `pending_restart`; the agent does not restart PostgreSQL. Apply them
+using Patroni's restart order and coordinate VM resizing across all members.
+Do not shrink RAM below the memory required by the active PostgreSQL settings.
+Container cgroup limits are not supported.
+
 ## API Structure
 
 ### Creating a PostgreSQL Instance
