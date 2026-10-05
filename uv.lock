@@ -601,7 +601,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.15.2" },
     { name = "gcl-iam", specifier = ">=1.4.0,<2.0.0" },
     { name = "gcl-looper", specifier = ">=1.2.3,<2.0.0" },
-    { name = "gcl-sdk", specifier = ">=3.6.4" },
+    { name = "gcl-sdk", specifier = ">=3.6.4,<4.0.0" },
     { name = "mkdocs-glightbox", marker = "extra == 'docs'" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = "==9.7.7" },
     { name = "mkdocs-render-swagger-plugin", marker = "extra == 'docs'" },
