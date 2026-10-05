@@ -1206,13 +1206,6 @@ components:
           key: value
         readOnly: true
         nullable: true
-    PGInstance_roles_imported:
-      name: roles_imported
-      in: query
-      schema:
-        type: boolean
-        example: true
-        default: false
     PGInstance_restore_status:
       name: restore_status
       in: query
@@ -1228,16 +1221,6 @@ components:
             items: {}
         example:
           key: value
-        nullable: true
-    PGInstance_patroni_password:
-      name: patroni_password
-      in: query
-      schema:
-        type: string
-        example: ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss
-        minLength: 64
-        maxLength: 64
-        readOnly: true
         nullable: true
     PGBackupPolicy_uuid:
       name: uuid
@@ -1582,14 +1565,6 @@ components:
         minLength: 8
         maxLength: 99
         nullable: true
-    PGUser_password_hash:
-      name: password_hash
-      in: query
-      schema:
-        type: string
-        example: any_string
-        minLength: 1
-        maxLength: 512
     PGVersion_uuid:
       name: uuid
       in: query
@@ -1830,12 +1805,10 @@ paths:
         - ipsv4
         - name
         - nodes_number
-        - patroni_password
         - project_id
         - ram
         - restore_from
         - restore_status
-        - roles_imported
         - status
         - sync_replica_number
         - updated_at
@@ -1854,8 +1827,6 @@ paths:
       - $ref: '#/components/parameters/PGInstance_nodes_number'
       - $ref: '#/components/parameters/PGInstance_sync_replica_number'
       - $ref: '#/components/parameters/PGInstance_version'
-      - $ref: '#/components/parameters/PGInstance_roles_imported'
-      - $ref: '#/components/parameters/PGInstance_patroni_password'
       responses:
         '200':
           description: PGInstance_Filter
