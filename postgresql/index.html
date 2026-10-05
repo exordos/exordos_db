@@ -416,6 +416,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#automatic-postgresql-resource-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic PostgreSQL resource settings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#api-structure" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1013,6 +1024,92 @@
 <li>Data disk for database storage</li>
 <li>Automatic failover and replication</li>
 </ul>
+<h2 id="automatic-postgresql-resource-settings">Automatic PostgreSQL resource settings<a class="headerlink" href="#automatic-postgresql-resource-settings" title="Permanent link">#</a></h2>
+<p>The primary calculates a shared profile from its CPU affinity and total VM
+RAM, then patches changed parameters in Patroni DCS on target application and
+polling. Node sets must have uniformly sized VMs. The agent owns the parameters
+below; unrelated DCS settings are preserved. DCS is checked once per agent
+start and again when CPU or RAM changes; unchanged resources skip tuning.</p>
+<p>Sizing floors preserve PG18 defaults and the fixed connection/vacuum limits:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Sizing rule</th>
+<th>Bounds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shared_buffers</code></td>
+<td>25% RAM; 12.5% below 1 GiB</td>
+<td>At least 128 MiB</td>
+</tr>
+<tr>
+<td><code>effective_cache_size</code></td>
+<td>70% RAM; planner estimate, not allocation</td>
+<td>At least 4 GiB</td>
+</tr>
+<tr>
+<td><code>max_connections</code></td>
+<td>Fixed</td>
+<td>500</td>
+</tr>
+<tr>
+<td><code>work_mem</code></td>
+<td>15% RAM / (500 connections × 6)</td>
+<td>4–16 MiB</td>
+</tr>
+<tr>
+<td><code>hash_mem_multiplier</code></td>
+<td>Fixed; the factor 6 allows three hash operations</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>maintenance_work_mem</code></td>
+<td>5% RAM</td>
+<td>64 MiB–1 GiB</td>
+</tr>
+<tr>
+<td><code>autovacuum_max_workers</code></td>
+<td>Fixed</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>autovacuum_work_mem</code></td>
+<td>10% RAM / 5 workers</td>
+<td>64–256 MiB per worker</td>
+</tr>
+<tr>
+<td><code>max_worker_processes</code></td>
+<td>CPU count + 4</td>
+<td>At least 8</td>
+</tr>
+<tr>
+<td><code>max_parallel_workers</code></td>
+<td>CPU count</td>
+<td>At least 8</td>
+</tr>
+<tr>
+<td><code>max_parallel_workers_per_gather</code></td>
+<td>Half the CPU count</td>
+<td>2–4</td>
+</tr>
+<tr>
+<td><code>max_parallel_maintenance_workers</code></td>
+<td>Half the CPU count</td>
+<td>2–4</td>
+</tr>
+</tbody>
+</table>
+<p>Floors take precedence over sizing budgets on small nodes. These are not hard
+memory limits: size client connection pools to available RAM; the 500-connection
+cap is not a safe concurrency budget for small nodes.</p>
+<p>Resource detection failures preserve existing settings. Startup parameters
+remain <code>pending_restart</code>; the agent does not restart PostgreSQL. Apply them
+using Patroni's restart order and coordinate VM resizing across all members.
+Do not shrink RAM below the memory required by the active PostgreSQL settings.
+Container cgroup limits are not supported.</p>
 <h2 id="api-structure">API Structure<a class="headerlink" href="#api-structure" title="Permanent link">#</a></h2>
 <h3 id="creating-a-postgresql-instance">Creating a PostgreSQL Instance<a class="headerlink" href="#creating-a-postgresql-instance" title="Permanent link">#</a></h3>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
