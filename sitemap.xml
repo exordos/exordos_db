@@ -2,38 +2,38 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://github.com/infraguys/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/monitoring/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/monitoring.ru/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/persistent-storage-bootstrap/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/postgresql/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/raft-authentication/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/openapi/openapi_orch/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/openapi/openapi_status/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://github.com/infraguys/openapi/openapi_user/</loc>
-         <lastmod>2026-10-02</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
 </urlset>
