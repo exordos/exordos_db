@@ -15,7 +15,6 @@ from typing import Any
 
 from gcl_sdk.audit.dm import models as audit_models
 
-
 _SECRET_FIELDS = frozenset(
     {
         "password",
