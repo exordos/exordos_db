@@ -1,0 +1,90 @@
+# Copyright 2026 Genesis Corporation.
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+name: "dbaas_audit"
+description: "Optional Audit delivery for DBaaS"
+schema_version: 1
+version: "{{ version }}"
+api_version: "v1"
+
+requirements:
+  dbaas:
+    from_version: "0.0.0"
+  audit:
+    from_version: "0.0.0"
+  core:
+    from_version: "0.0.0"
+
+imports:
+  dbaas_project:
+    element: "$dbaas"
+    kind: "resource"
+    link: "$core.iam.projects.$dbaas_project"
+  dbaas_cp:
+    element: "$dbaas"
+    kind: "resource"
+    link: "$core.compute.nodes.$dbaas_cp"
+  audit_events_create:
+    element: "$audit"
+    kind: "resource"
+    link: "$core.iam.permissions.$events_create"
+  var_iam_default_client_uuid:
+    element: "$core"
+    kind: "resource"
+    link: "$core.vs.variables.$iam_default_client_uuid"
+
+resources:
+
+  $core.iam.users:
+    dbaas_audit_user:
+      username: dbaas_audit
+      email: "noreply+dbaas-audit@exordos.com"
+      type: service
+      password: "unused-by-a-service-account"
+
+  $core.iam.roles:
+    dbaas_audit:
+      name: dbaas_audit
+      description: "DBaaS audit event delivery"
+
+  $core.iam.permissionbinding:
+    dbaas_audit_events_create_binding:
+      role: $core.iam.roles.$dbaas_audit:uuid
+      permission: $dbaas_audit.imports.$audit_events_create:uuid
+      project_id: $dbaas_audit.imports.$dbaas_project:uuid
+
+  $core.iam.rolebinding:
+    dbaas_audit_role_binding:
+      role: $core.iam.roles.$dbaas_audit:uuid
+      user: $core.iam.users.$dbaas_audit_user:uuid
+      project: $dbaas_audit.imports.$dbaas_project:uuid
+
+  $core.iam.tokens:
+    dbaas_audit_token:
+      user: $core.iam.users.$dbaas_audit_user:uuid
+      iam_client: $dbaas_audit.imports.$var_iam_default_client_uuid:value
+      issuer: f"http://core.local.genesis-core.tech/api/core/v1/iam/clients/{$dbaas_audit.imports.$var_iam_default_client_uuid:value}"
+      scope: f"project:{$dbaas_audit.imports.$dbaas_project:uuid}"
+      auto_renew: true
+      expiration_delta: 604800
+
+  $core.config.configs:
+    dbaas_audit_config:
+      project_id: "12345678-c625-4fee-81d5-f691897b8142"
+      path: /etc/exordos_db/exordos_db.d/audit.conf
+      mode: "0600"
+      target:
+        kind: node
+        node: $dbaas_audit.imports.$dbaas_cp:uuid
+      on_change:
+        kind: shell
+        command: systemctl try-restart exordos-db-user-api
+      body:
+        kind: text
+        content: |
+          f"
+          [audit_delivery]
+          enabled = true
+          endpoint = {{ audit_endpoint | default('http://audit.local.genesis-core.tech:8080/') }}
+          auth_token = {$core.iam.tokens.$dbaas_audit_token:access_token}
+          "

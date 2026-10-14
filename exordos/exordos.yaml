@@ -86,3 +86,5 @@ build:
     # Backups of the communal PG cluster, a separate element so that only the
     # installations which want them need S3
     - manifest: manifests/communal_pg_cluster_backup.yaml.j2
+
+    - manifest: manifests/dbaas_audit.yaml.j2

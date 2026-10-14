@@ -64,6 +64,7 @@ sudo systemctl disable --now "postgresql"
 
 # Install exordos db
 sudo mkdir -p $GC_CFG_DIR
+sudo mkdir -p $GC_CFG_DIR/exordos_db.d
 sudo cp "$GC_PATH/etc/exordos_db/exordos_db.conf.j2" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/core_agent.conf.j2" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/exordos_db/logging.yaml" $GC_CFG_DIR/
