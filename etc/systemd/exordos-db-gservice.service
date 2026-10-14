@@ -8,7 +8,7 @@ Restart=on-failure
 RestartSec=5s
 KillSignal=SIGINT
 #ExecStart=gcl-looper-launchpad-service --config-file /etc/exordos_db/exordos_db.conf
-ExecStart=exordos-db-gservice --config-file /etc/exordos_db/exordos_db.conf
+ExecStart=exordos-db-gservice --config-dir /etc/exordos_db/exordos_db.d --config-file /etc/exordos_db/exordos_db.conf
 
 [Install]
 WantedBy=multi-user.target
