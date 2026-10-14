@@ -121,7 +121,10 @@ class TestBackupPolicy:
     def test_spec_of_the_instance(self, monkeypatch):
         policy = _policy(full_interval_hours=48, incr_interval_hours=6)
         instance = policy.instance
-        get_policy = lambda: policy
+
+        def get_policy():
+            return policy
+
         monkeypatch.setattr(instance, "get_backup_policy", get_policy, raising=False)
 
         spec = paas_builder.PGInstanceBuilder._get_backup(None, instance)
@@ -134,7 +137,10 @@ class TestBackupPolicy:
 
     def test_no_policy_no_backups(self, monkeypatch):
         instance = _policy().instance
-        get_policy = lambda: None
+
+        def get_policy():
+            return None
+
         monkeypatch.setattr(instance, "get_backup_policy", get_policy, raising=False)
 
         assert paas_builder.PGInstanceBuilder._get_backup(None, instance) is None
