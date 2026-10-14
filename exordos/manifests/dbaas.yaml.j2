@@ -274,6 +274,9 @@ imports:
     link: "$core.vs.variables.$iam_default_client_uuid"
 
 exports:
+  dbaas_cp:
+    kind: resource
+    link: "$core.compute.nodes.$dbaas_cp"
   pg18:
     link: "$dbaas.types.postgres.versions.$pg18"
   dbaas_organization:

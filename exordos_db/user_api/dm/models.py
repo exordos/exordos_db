@@ -25,8 +25,8 @@ from restalchemy.dm import models
 from restalchemy.dm import properties
 from restalchemy.dm import relationships
 from restalchemy.dm import types
-from restalchemy.storage.sql import orm
 
+from exordos_db.common import audit as audit_models
 from exordos_db.common import utils as u
 from exordos_db.common.pg_auth import passwd
 from exordos_db.user_api.dm import backups
@@ -56,10 +56,11 @@ class PGVersion(
     models.ModelWithUUID,
     models.ModelWithNameDesc,
     models.ModelWithTimestamp,
-    orm.SQLStorableMixin,
+    audit_models.AuditLogSQLStorableMixin,
     ua_models.TargetResourceMixin,
 ):
     __tablename__ = "postgres_versions"
+    __audit_resource_type__ = "postgres_versions"
 
     image = properties.property(types.String(max_length=2048))
 
@@ -69,9 +70,10 @@ class PGInstance(
     models.ModelWithNameDesc,
     models.ModelWithProject,
     models.ModelWithTimestamp,
-    orm.SQLStorableMixin,
+    audit_models.AuditLogSQLStorableMixin,
 ):
     __tablename__ = "postgres_instances"
+    __audit_resource_type__ = "postgres_instances"
 
     name = properties.property(types.String(min_length=1, max_length=255))
     status = properties.property(
@@ -160,7 +162,7 @@ class InstanceChildModel(
     models.ModelWithTimestamp,
     models.ModelWithProject,
     ua_models.TargetResourceMixin,
-    orm.SQLStorableMixin,
+    audit_models.AuditLogSQLStorableMixin,
 ):
     instance = relationships.relationship(PGInstance, required=True, read_only=True)
 
@@ -186,6 +188,7 @@ class InstanceChildModel(
 
 class PGUser(InstanceChildModel):
     __tablename__ = "postgres_users"
+    __audit_resource_type__ = "postgres_users"
 
     name = properties.property(PGRoleNameType(), required=True, read_only=True)
     status = properties.property(
@@ -216,6 +219,7 @@ class PGUser(InstanceChildModel):
 
 class PGDatabase(InstanceChildModel):
     __tablename__ = "postgres_databases"
+    __audit_resource_type__ = "postgres_databases"
 
     name = properties.property(PGNameType(), required=True)
     status = properties.property(
@@ -235,6 +239,7 @@ class PGBackupPolicy(InstanceChildModel):
     """
 
     __tablename__ = "postgres_backup_policies"
+    __audit_resource_type__ = "postgres_backup_policies"
 
     storage = properties.property(backups.STORAGE_TYPE, required=True)
     full_interval_hours = properties.property(

@@ -108,6 +108,8 @@ else
     sudo sed -i "s|^\[iam\]$|[iam]\niam_endpoint = ${IAM_ENDPOINT}|" "$SERVICE_CONFIG"
 fi
 
+sudo mkdir -p /etc/exordos_db/exordos_db.d
+
 source "$GC_PATH"/.venv/bin/activate
 ra-apply-migration --config-dir "/etc/exordos_db/" --path "$($GC_PATH/.venv/bin/python3 -c 'import gcl_sdk; print(gcl_sdk.__path__[0] + "/migrations")')"
 ra-apply-migration --config-dir "/etc/exordos_db/" --path "$GC_PATH/migrations"
