@@ -9,32 +9,10 @@ on:
 
 jobs:
   Build:
-    runs-on: [ self-hosted, vm ]
     if: ${{ github.actor != 'dependabot[bot]' }}
-    strategy:
-      fail-fast: true
-    outputs:
-      version: ${{ steps.build_element.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Build Element
-        id: build_element
-        env:
-          PUSH_CFG: ${{ secrets.PUSH_CFG }}
-        run: |
-          set -eux
-
-          VERSION="$(exordos get-version .)"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-
-          # Build both element images (exordos-db, exordos-db-pg) in parallel
-          exordos build -j 2 $(pwd)
-
-          # Decode and write the push configuration
-          echo "$PUSH_CFG" | base64 -d > exordos/exordos.push.yaml
-          exordos push -c exordos/exordos.push.yaml -t local -f --latest
+    uses: exordos/exordos_ci/.github/workflows/element_build.yml@master
+    secrets:
+      PUSH_CFG: ${{ secrets.PUSH_CFG }}
   # communal_pg_cluster is built alongside dbaas with the same version: a PG
   # instance ordered through dbaas, so installing it runs the control plane
   # and the data plane both, and the check waits for that instance.
