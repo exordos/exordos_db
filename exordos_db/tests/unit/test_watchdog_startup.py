@@ -1,9 +1,9 @@
 """Execute the shipped startup predicate without opening a real watchdog."""
 
 import os
-from pathlib import Path
 import shlex
 import subprocess
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,6 +31,7 @@ def run_guard(tmp_path, *, appears):
     sleep.chmod(0o755)
     result = subprocess.run(
         shlex.split(command),
+        check=False,
         env={
             **os.environ,
             "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
