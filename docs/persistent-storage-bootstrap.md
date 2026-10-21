@@ -41,6 +41,16 @@ step succeeded. Verify `findmnt --mountpoint` for `/persist`,
 `/var/lib/postgresql/patroni/data`, and `/var/lib/postgresql/patroni/raft`, then
 check Patroni and the control-plane configuration status.
 
+The required watchdog must be writable by `postgres` before Patroni starts.
+The unit loads `softdog` and waits up to 25 seconds for udev permissions. An
+expired wait fails the pre-start command; systemd retries after five seconds.
+Starting Patroni without the device can leave it permanently in replica mode
+even after the device appears, because failed watchdog activation is cached.
+Keep watchdog mode `required`; repair the device and restart Patroni instead of
+forcing promotion or reinitializing existing data. Confirm the cluster member
+list and backups before recovery, then verify `pg_is_in_recovery()` is false
+and a write transaction succeeds on the elected primary.
+
 ## Regression checks
 
 `tox -e py312` runs the real PG bootstrap script with command stubs, covering
@@ -48,3 +58,8 @@ stop failures, disk discovery/preparation errors, failures in either migration,
 and a successful retry. It also checks agent ordering, hard mount assertions,
 and startup on first configuration. These tests do not replace a real image boot
 with an attached persistent disk.
+
+`exordos_db/tests/unit/test_watchdog_startup.py` executes the shipped shell
+predicate with a late or absent synthetic device. It verifies that an absent
+watchdog fails startup after the bounded wait and a late device allows startup.
+The tests never open a real watchdog or change host services.
