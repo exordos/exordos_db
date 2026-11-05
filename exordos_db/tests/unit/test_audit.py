@@ -138,7 +138,7 @@ def test_audit_event_keeps_user_actor_and_resource_project(actor) -> None:
     context = SimpleNamespace(
         iam_context=SimpleNamespace(
             token_info=SimpleNamespace(user_uuid=actor),
-            introspection_info=lambda: {},
+            introspection_info=dict,
         )
     )
     session = mock.Mock()
