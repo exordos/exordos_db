@@ -8,7 +8,7 @@ Restart=on-failure
 RestartSec=5s
 KillSignal=SIGINT
 ExecStartPre=/bin/sleep 2
-ExecStart=exordos-db-user-api --config-file /etc/exordos_db/exordos_db.conf
+ExecStart=exordos-db-user-api --config-dir /etc/exordos_db/exordos_db.d --config-file /etc/exordos_db/exordos_db.conf
 
 [Install]
 WantedBy=multi-user.target

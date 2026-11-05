@@ -6,7 +6,7 @@ After=network-online.target
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=5
-ExecStart=exordos-universal-agent-db-back --config-file /etc/exordos_db/core_agent.conf
+ExecStart=exordos-universal-agent-db-back --config-dir /etc/exordos_db/exordos_db.d --config-file /etc/exordos_db/core_agent.conf
 
 [Install]
 WantedBy=multi-user.target

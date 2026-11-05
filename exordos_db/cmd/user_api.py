@@ -21,6 +21,8 @@ from gcl_iam import drivers
 from gcl_iam import opts as iam_opts
 from gcl_looper.services import bjoern_service
 from gcl_looper.services import hub
+from gcl_sdk.audit import opts as audit_opts
+from gcl_sdk.audit.services import senders as audit_senders
 from oslo_config import cfg
 from restalchemy.common import config_opts as ra_config_opts
 from restalchemy.storage.sql import engines
@@ -54,6 +56,7 @@ CONF = cfg.CONF
 CONF.register_cli_opts(api_cli_opts, DOMAIN)
 ra_config_opts.register_posgresql_db_opts(CONF)
 iam_opts.register_iam_cli_opts(CONF)
+audit_opts.register_audit_delivery_opts(CONF)
 
 
 def main():
@@ -90,6 +93,16 @@ def main():
         )
 
         service_hub.add_service(service)
+
+    if audit_opts.get_audit_delivery_config(CONF).enabled:
+        audit_sender = audit_senders.AuditSenderService.build_from_config(
+            conf=CONF,
+            iter_min_period=3,
+        )
+        audit_sender.add_setup(
+            lambda: engines.engine_factory.configure_postgresql_factory(conf=CONF)
+        )
+        service_hub.add_service(audit_sender)
 
     service_hub.start()
 

@@ -23,8 +23,8 @@ import uuid
 import pytest
 from restalchemy.api import constants as api_c
 from restalchemy.api import field_permissions
-from restalchemy.storage.sql import orm
 
+from exordos_db.common import audit
 from exordos_db.infra.dm import models as infra_models
 from exordos_db.infra.services import builder
 from exordos_db.user_api.api import controllers
@@ -45,7 +45,7 @@ def instance(password=None):
 
 
 def test_creation_generates_independent_credentials_and_loading_keeps_them(monkeypatch):
-    monkeypatch.setattr(orm.SQLStorableMixin, "insert", lambda *a, **kw: None)
+    monkeypatch.setattr(audit.AuditLogSQLStorableMixin, "insert", lambda *a, **kw: None)
     first, second = instance(), instance()
     first.insert()
     second.insert()
