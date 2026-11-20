@@ -119,10 +119,20 @@ Floors take precedence over sizing budgets on small nodes. These are not hard
 memory limits: size client connection pools to available RAM; the 500-connection
 cap is not a safe concurrency budget for small nodes.
 
-Resource detection failures preserve existing settings. Startup parameters
-remain `pending_restart`; the agent does not restart PostgreSQL. Apply them
-using Patroni's restart order and coordinate VM resizing across all members.
-Do not shrink RAM below the memory required by the active PostgreSQL settings.
+Before Patroni starts, its systemd pre-start command calculates `shared_buffers`
+from the current guest RAM. A local YAML fragment in `/run/exordos-db-patroni`
+overrides that parameter in the cached DCS profile. This prevents a VM resized
+from 8 GiB to 4 GiB from starting with the old 2 GiB buffer until an agent's
+later update and another PostgreSQL restart. The managed configuration is
+symlinked into the same directory, so subsequent Core configuration reloads
+still take effect. No data or DCS files are rewritten by the pre-start command.
+
+Other startup parameters remain `pending_restart`; the agent does not restart
+PostgreSQL. Apply them using Patroni's restart order and coordinate VM resizing
+across all members. A live memory reduction still requires a coordinated restart:
+the pre-start calculation runs on Patroni service startup, not on a reload.
+Resource detection failure during agent polling preserves existing settings;
+failure during startup prevents starting with an unverified old memory profile.
 Container cgroup limits are not supported.
 
 ## API Structure
