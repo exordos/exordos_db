@@ -685,7 +685,7 @@ wheels = [
 
 [[package]]
 name = "gcl-sdk"
-version = "3.7.6"
+version = "3.7.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bjoern" },
@@ -700,9 +700,9 @@ dependencies = [
     { name = "restalchemy" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/8b/b85adb565e0e576b69bcb5c9bb6664856d19434deb66c4bb8af639052c3d/gcl_sdk-3.7.6.tar.gz", hash = "sha256:2293b884cc01b03563d65cfaaffa67111451e8e0314dd633b901f86f51f11fa2", size = 415454, upload-time = "2026-11-03T10:09:29.141Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/c0/c06a5248f8bf92cd3ab95f1805a2c5ab503694e753b238fe0c6cf8fd2879/gcl_sdk-3.7.7.tar.gz", hash = "sha256:a2410d1acb69822ef89f18cf2b2d0279458fd9308431cb12500d045b24812a14", size = 416290, upload-time = "2026-11-06T11:17:58.215Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/d8/0ea1ff7d09d56df8e7cbcf75764558d8d45a4691afddbc7163521eeb6922/gcl_sdk-3.7.6-py3-none-any.whl", hash = "sha256:8854f93a178e29eb012cab23e8832943589e64d49ac9deb28dcfe64a50824bc4", size = 372302, upload-time = "2026-11-03T10:09:26.652Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/32/09965dde2c9a1b203c5fa29d56a7daa276fc8acdf24e5e3eec9deb83c5f0/gcl_sdk-3.7.7-py3-none-any.whl", hash = "sha256:34f90eb2b8eb7183b8c228553cc77ad58fc5d7bade5b1ce762e4c7357b9ee1fb", size = 373121, upload-time = "2026-11-06T11:17:56.724Z" },
 ]
 
 [[package]]
