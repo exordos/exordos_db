@@ -29,6 +29,7 @@ resources:
       # The same major version and room for the data of the source
       disk_size: 20
       version: $example_pg_restore.imports.$pg18:uuid
+      version_ref: $example_pg_restore.imports.$pg18:version_ref
       restore_from:
         kind: s3
         endpoint: f"http://{$example_pg_restore.imports.$communal_s3:join(ipsv4)}:9000"

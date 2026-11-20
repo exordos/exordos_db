@@ -30,6 +30,7 @@ from gcl_sdk.infra.services import builder
 from oslo_config import cfg
 from restalchemy.dm import filters as dm_filters
 
+from exordos_db.common import version_ref as vr
 from exordos_db.infra.dm import models
 
 LOG = logging.getLogger(__name__)
@@ -355,7 +356,11 @@ class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableServi
                     disks=[
                         {
                             "size": models.ROOT_DISK_SIZE,
-                            "image": instance.version.image,
+                            "image": (
+                                vr.parse_disk_image(instance.version_ref)
+                                if instance.version_ref
+                                else instance.version.image
+                            ),
                             "label": "root",
                         },
                         {

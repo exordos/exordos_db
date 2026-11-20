@@ -108,6 +108,7 @@ resources:
       ram: $example_pg_backup.imports.$var_default_ram:value
       disk_size: 20
       version: $example_pg_backup.imports.$pg18:uuid
+      version_ref: $example_pg_backup.imports.$pg18:version_ref
 
   # The policy may as well be in another element than the instance, see
   # communal_pg_cluster_backup
