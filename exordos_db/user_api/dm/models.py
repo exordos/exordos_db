@@ -28,6 +28,7 @@ from restalchemy.dm import types
 
 from exordos_db.common import audit as audit_models
 from exordos_db.common import utils as u
+from exordos_db.common import version_ref as vr
 from exordos_db.common.pg_auth import passwd
 from exordos_db.user_api.dm import backups
 
@@ -63,6 +64,15 @@ class PGVersion(
     __audit_resource_type__ = "postgres_versions"
 
     image = properties.property(types.String(max_length=2048))
+    version_ref = properties.property(types.String(max_length=4096), default="")
+
+    def insert(self, session=None):
+        self.version_ref = vr.build_version_ref(str(self.uuid), self.image)
+        super().insert(session=session)
+
+    def update(self, session=None, force=False):
+        self.version_ref = vr.build_version_ref(str(self.uuid), self.image)
+        super().update(session=session, force=force)
 
 
 class PGInstance(
@@ -92,8 +102,8 @@ class PGInstance(
     sync_replica_number = properties.property(
         types.Integer(min_value=0, max_value=15), default=1
     )
-    # TODO: support version update
     version = relationships.relationship(PGVersion, required=True, read_only=True)
+    version_ref = properties.property(types.String(max_length=4096), default="")
     # Bootstrap the cluster from a backup instead of an empty database
     restore_from = properties.property(
         backups.RESTORE_SOURCE_TYPE, default=None, read_only=True

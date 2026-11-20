@@ -24,6 +24,7 @@ resources:
       ram: $pg_cluster.imports.$var_default_ram:value
       disk_size: 20
       version: $pg_cluster.imports.$pg18:uuid
+      version_ref: $pg_cluster.imports.$pg18:version_ref
 
 imports:
   pg18:
