@@ -28,10 +28,12 @@ from gcl_sdk.infra import constants as sdk_c
 from gcl_sdk.infra.dm import models as sdk_models
 from gcl_sdk.infra.services import builder
 from oslo_config import cfg
+from restalchemy.common import contexts
 from restalchemy.dm import filters as dm_filters
 
 from exordos_db.common import version_ref as vr
 from exordos_db.infra.dm import models
+from exordos_db.user_api.dm import models as dm_models
 
 LOG = logging.getLogger(__name__)
 NODE_KIND = sdk_models.Node.get_resource_kind()
@@ -195,6 +197,23 @@ def patroni_on_change(password: str | None) -> sdk_models.OnChangeShell:
 
 
 class CoreInfraBuilder(builder.CoreInfraBuilder, oslo_base.OsloConfigurableService):
+    def _setup(self):
+        super()._setup()
+        repaired = 0
+        with contexts.Context().session_manager() as session:
+            for version in dm_models.PGVersion.objects.get_all(
+                session=session, locked=True
+            ):
+                if version.version_ref != vr.build_version_ref(
+                    str(version.uuid), version.image
+                ):
+                    version.update(session=session)
+                    repaired += 1
+        if repaired:
+            LOG.info(
+                "Repaired %d stale PostgreSQL version references at startup", repaired
+            )
+
     def __init__(
         self,
         core_username,

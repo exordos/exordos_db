@@ -20,6 +20,7 @@ import secrets
 import typing as tp
 
 from gcl_sdk.agents.universal.dm import models as ua_models
+from restalchemy.common import exceptions as ra_exc
 from restalchemy.dm import filters as dm_filters
 from restalchemy.dm import models
 from restalchemy.dm import properties
@@ -31,6 +32,10 @@ from exordos_db.common import utils as u
 from exordos_db.common import version_ref as vr
 from exordos_db.common.pg_auth import passwd
 from exordos_db.user_api.dm import backups
+
+
+class PGValidationError(ra_exc.ValidationErrorException):
+    message = "%(details)s"
 
 
 class PGStatus(str, enum.Enum):
@@ -124,8 +129,18 @@ class PGInstance(
     )
 
     def insert(self, session: tp.Any = None) -> None:
+        self._validate_version_ref()
         self.properties["patroni_password"].set_value_force(secrets.token_hex(32))
         super().insert(session=session)
+
+    def _validate_version_ref(self):
+        # Empty references retain the legacy related-version image fallback.
+        if self.version_ref and self.version_ref != vr.build_version_ref(
+            str(self.version.uuid), self.version.image
+        ):
+            raise PGValidationError(
+                details="version_ref must match the selected version UUID and image"
+            )
 
     def get_resource_ignore_fields(self) -> set[str]:
         # Core resource reports and the PG resource carry no Raft credentials.
@@ -157,6 +172,9 @@ class PGInstance(
 
     def update(self, session=None, force=False):
         self._validate_update(session=session)
+        # Allow unrelated updates while a changed image propagates to consumers.
+        if self.properties["version_ref"].is_dirty():
+            self._validate_version_ref()
         super().update(session=session, force=force)
 
     def delete(self, session=None, **kwargs):
