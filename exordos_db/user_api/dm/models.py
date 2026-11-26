@@ -20,6 +20,7 @@ import secrets
 import typing as tp
 
 from gcl_sdk.agents.universal.dm import models as ua_models
+from restalchemy.common import exceptions as ra_exc
 from restalchemy.dm import filters as dm_filters
 from restalchemy.dm import models
 from restalchemy.dm import properties
@@ -28,8 +29,13 @@ from restalchemy.dm import types
 
 from exordos_db.common import audit as audit_models
 from exordos_db.common import utils as u
+from exordos_db.common import version_ref as vr
 from exordos_db.common.pg_auth import passwd
 from exordos_db.user_api.dm import backups
+
+
+class PGValidationError(ra_exc.ValidationErrorException):
+    message = "%(details)s"
 
 
 class PGStatus(str, enum.Enum):
@@ -63,6 +69,15 @@ class PGVersion(
     __audit_resource_type__ = "postgres_versions"
 
     image = properties.property(types.String(max_length=2048))
+    version_ref = properties.property(types.String(max_length=4096), default="")
+
+    def insert(self, session=None):
+        self.version_ref = vr.build_version_ref(str(self.uuid), self.image)
+        super().insert(session=session)
+
+    def update(self, session=None, force=False):
+        self.version_ref = vr.build_version_ref(str(self.uuid), self.image)
+        super().update(session=session, force=force)
 
 
 class PGInstance(
@@ -92,8 +107,8 @@ class PGInstance(
     sync_replica_number = properties.property(
         types.Integer(min_value=0, max_value=15), default=1
     )
-    # TODO: support version update
     version = relationships.relationship(PGVersion, required=True, read_only=True)
+    version_ref = properties.property(types.String(max_length=4096), default="")
     # Bootstrap the cluster from a backup instead of an empty database
     restore_from = properties.property(
         backups.RESTORE_SOURCE_TYPE, default=None, read_only=True
@@ -114,8 +129,18 @@ class PGInstance(
     )
 
     def insert(self, session: tp.Any = None) -> None:
+        self._validate_version_ref()
         self.properties["patroni_password"].set_value_force(secrets.token_hex(32))
         super().insert(session=session)
+
+    def _validate_version_ref(self):
+        # Empty references retain the legacy related-version image fallback.
+        if self.version_ref and self.version_ref != vr.build_version_ref(
+            str(self.version.uuid), self.version.image
+        ):
+            raise PGValidationError(
+                details="version_ref must match the selected version UUID and image"
+            )
 
     def get_resource_ignore_fields(self) -> set[str]:
         # Core resource reports and the PG resource carry no Raft credentials.
@@ -147,6 +172,9 @@ class PGInstance(
 
     def update(self, session=None, force=False):
         self._validate_update(session=session)
+        # Allow unrelated updates while a changed image propagates to consumers.
+        if self.properties["version_ref"].is_dirty():
+            self._validate_version_ref()
         super().update(session=session, force=force)
 
     def delete(self, session=None, **kwargs):
