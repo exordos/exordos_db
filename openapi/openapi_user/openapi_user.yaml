@@ -140,6 +140,11 @@ components:
         version:
           type: string
           readOnly: true
+        version_ref:
+          type: string
+          example: any_string
+          maxLength: 4096
+          default: ''
         restore_from:
           type: object
           oneOf:
@@ -330,6 +335,11 @@ components:
           default: 1
         version:
           type: string
+        version_ref:
+          type: string
+          example: any_string
+          maxLength: 4096
+          default: ''
         restore_from:
           type: object
           oneOf:
@@ -975,6 +985,12 @@ components:
           type: string
           example: any_string
           maxLength: 2048
+        version_ref:
+          type: string
+          example: any_string
+          maxLength: 4096
+          readOnly: true
+          default: ''
     PGVersion_Create:
       $ref: '#/components/schemas/PGVersion_Get'
     PGVersion_Update:
@@ -1114,6 +1130,14 @@ components:
       schema:
         type: string
         readOnly: true
+    PGInstance_version_ref:
+      name: version_ref
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 4096
+        default: ''
     PGInstance_restore_from:
       name: restore_from
       in: query
@@ -1625,6 +1649,14 @@ components:
         type: string
         example: any_string
         maxLength: 2048
+    PGVersion_version_ref:
+      name: version_ref
+      in: query
+      schema:
+        type: string
+        example: any_string
+        maxLength: 4096
+        default: ''
 paths:
   /:
     get:
@@ -1814,6 +1846,7 @@ paths:
         - updated_at
         - uuid
         - version
+        - version_ref
       - $ref: '#/components/parameters/PGInstance_uuid'
       - $ref: '#/components/parameters/PGInstance_name'
       - $ref: '#/components/parameters/PGInstance_description'
@@ -1827,6 +1860,7 @@ paths:
       - $ref: '#/components/parameters/PGInstance_nodes_number'
       - $ref: '#/components/parameters/PGInstance_sync_replica_number'
       - $ref: '#/components/parameters/PGInstance_version'
+      - $ref: '#/components/parameters/PGInstance_version_ref'
       responses:
         '200':
           description: PGInstance_Filter
@@ -2231,12 +2265,14 @@ paths:
         - name
         - updated_at
         - uuid
+        - version_ref
       - $ref: '#/components/parameters/PGVersion_uuid'
       - $ref: '#/components/parameters/PGVersion_name'
       - $ref: '#/components/parameters/PGVersion_description'
       - $ref: '#/components/parameters/PGVersion_created_at'
       - $ref: '#/components/parameters/PGVersion_updated_at'
       - $ref: '#/components/parameters/PGVersion_image'
+      - $ref: '#/components/parameters/PGVersion_version_ref'
       responses:
         '200':
           description: PGVersion_Filter
